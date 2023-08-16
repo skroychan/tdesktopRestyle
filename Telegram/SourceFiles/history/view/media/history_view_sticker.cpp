@@ -400,12 +400,7 @@ QPixmap Sticker::paintedPixmap(const PaintContext &context) const {
 }
 
 bool Sticker::mirrorHorizontal() const {
-	if (!hasPremiumEffect()) {
-		return false;
-	}
-	const auto rightAligned = _parent->hasOutLayout()
-		&& !_parent->delegate()->elementIsChatWide();
-	return !rightAligned;
+	return hasPremiumEffect();
 }
 
 ClickHandlerPtr Sticker::ShowSetHandler(not_null<DocumentData*> document) {

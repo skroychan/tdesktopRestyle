@@ -807,12 +807,7 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 }
 
 bool HistoryInner::canHaveFromUserpics() const {
-	if (_peer->isUser()
-		&& !_peer->isSelf()
-		&& !_peer->isRepliesChat()
-		&& !_isChatWide) {
-		return false;
-	} else if (_canHaveFromUserpicsSponsored) {
+	if (_canHaveFromUserpicsSponsored) {
 		return true;
 	} else if (_peer->isChannel() && !_peer->isMegagroup()) {
 		return false;

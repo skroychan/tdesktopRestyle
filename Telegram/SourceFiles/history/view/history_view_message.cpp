@@ -1016,7 +1016,6 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 					.patternViewport = context.viewport,
 					.outerWidth = width(),
 					.selected = context.selected(),
-					.outbg = context.outbg,
 					.rounding = countBubbleRounding(messageRounding),
 				},
 				.selection = mediaSelectionIntervals,
@@ -1989,7 +1988,7 @@ bool Message::hasFromPhoto() const {
 				return true;
 			}
 		}
-		return !item->out() && !item->history()->peer->isUser();
+		return true;
 	} break;
 	case Context::ContactPreview:
 		return false;
@@ -2638,11 +2637,9 @@ Reactions::ButtonParameters Message::reactionButtonParameters(
 		const TextState &reactionState) const {
 	using namespace Reactions;
 	auto result = ButtonParameters{ .context = data()->fullId() };
-	const auto outbg = hasOutLayout();
 	const auto outsideBubble = (!_comments && !embedReactionsInBubble());
 	const auto geometry = countGeometry();
 	result.pointer = position;
-	const auto onTheLeft = (outbg && !delegate()->elementIsChatWide());
 
 	const auto keyboard = data()->inlineReplyKeyboard();
 	const auto keyboardHeight = keyboard
@@ -2664,9 +2661,7 @@ Reactions::ButtonParameters Message::reactionButtonParameters(
 			: 0;
 	};
 	const auto relativeCenter = QPoint(
-		maybeRelativeCenter.value_or(onTheLeft
-			? -st::reactionCornerCenter.x()
-			: (geometry.width() + addOnTheRight())),
+		maybeRelativeCenter.value_or(geometry.width() + addOnTheRight()),
 		innerHeight + st::reactionCornerCenter.y());
 	result.center = geometry.topLeft() + relativeCenter;
 	if (reactionState.itemId != result.context
@@ -3026,11 +3021,6 @@ bool Message::hasFromName() const {
 	case Context::Replies: {
 		const auto item = data();
 		const auto peer = item->history()->peer;
-		if (hasOutLayout() && !item->from()->isChannel()) {
-			return false;
-		} else if (!peer->isUser()) {
-			return true;
-		}
 		if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
 			if (forwarded->imported
 				&& peer.get() == forwarded->originalSender) {
@@ -3039,7 +3029,7 @@ bool Message::hasFromName() const {
 				return true;
 			}
 		}
-		return false;
+		return true;
 	} break;
 	case Context::ContactPreview:
 		return false;
@@ -3162,7 +3152,7 @@ bool Message::hasFastReply() const {
 		return false;
 	}
 	const auto peer = data()->history()->peer;
-	return !hasOutLayout() && (peer->isChat() || peer->isMegagroup());
+	return peer->isChat() || peer->isMegagroup();
 }
 
 bool Message::displayFastReply() const {
@@ -3231,7 +3221,7 @@ bool Message::displayFastShare() const {
 
 bool Message::displayGoToOriginal() const {
 	if (isPinnedContext()) {
-		return !hasOutLayout();
+		return true;
 	}
 	const auto item = data();
 	if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
@@ -3541,14 +3531,12 @@ TextSelection Message::unskipTextSelection(TextSelection selection) const {
 
 QRect Message::innerGeometry() const {
 	auto result = countGeometry();
-	if (!hasOutLayout()) {
-		const auto w = std::max(
-			(media() ? media()->resolveCustomInfoRightBottom().x() : 0),
-			result.width());
-		result.setWidth(std::min(
-			w + rightActionSize().value_or(QSize(0, 0)).width() * 2,
-			width()));
-	}
+	const auto w = std::max(
+		(media() ? media()->resolveCustomInfoRightBottom().x() : 0),
+		result.width());
+	result.setWidth(std::min(
+		w + rightActionSize().value_or(QSize(0, 0)).width() * 2,
+		width()));
 	if (hasBubble()) {
 		result.translate(0, st::msgPadding.top() + st::mediaInBubbleSkip);
 
@@ -3590,13 +3578,10 @@ QRect Message::countGeometry() const {
 	const auto mediaWidth = (media && media->isDisplayed())
 		? media->width()
 		: width();
-	const auto outbg = hasOutLayout();
 	const auto availableWidth = width()
 		- st::msgMargin.left()
 		- (centeredView ? st::msgMargin.left() : st::msgMargin.right());
-	auto contentLeft = (outbg && !delegate()->elementIsChatWide())
-		? st::msgMargin.right()
-		: st::msgMargin.left();
+	auto contentLeft = st::msgMargin.left();
 	auto contentWidth = availableWidth;
 	if (hasFromPhoto()) {
 		contentLeft += st::msgPhotoSkip;
@@ -3618,9 +3603,7 @@ QRect Message::countGeometry() const {
 		}
 	}
 	if (contentWidth < availableWidth && !delegate()->elementIsChatWide()) {
-		if (outbg) {
-			contentLeft += availableWidth - contentWidth;
-		} else if (centeredView) {
+		if (centeredView) {
 			contentLeft += (availableWidth - contentWidth) / 2;
 		}
 	} else if (contentWidth < availableWidth && centeredView) {
@@ -3648,21 +3631,16 @@ Ui::BubbleRounding Message::countMessageRounding() const {
 		|| (keyboard != nullptr)
 		|| item->isFakeBotAbout()
 		|| (context() == Context::Replies && item->isDiscussionPost());
-	const auto right = !delegate()->elementIsChatWide() && hasOutLayout();
 	using Corner = Ui::BubbleCornerRounding;
 	return Ui::BubbleRounding{
-		.topLeft = (smallTop && !right) ? Corner::Small : Corner::Large,
-		.topRight = (smallTop && right) ? Corner::Small : Corner::Large,
-		.bottomLeft = ((smallBottom && !right)
+		.topLeft = smallTop ? Corner::Small : Corner::Large,
+		.topRight = Corner::Large,
+		.bottomLeft = smallBottom
 			? Corner::Small
-			: (!skipTail && !right)
+			: (!skipTail && true)
 			? Corner::Tail
-			: Corner::Large),
-		.bottomRight = ((smallBottom && right)
-			? Corner::Small
-			: (!skipTail && right)
-			? Corner::Tail
-			: Corner::Large),
+			: Corner::Large,
+		.bottomRight = Corner::Large,
 	};
 }
 
@@ -3840,9 +3818,6 @@ int Message::resizeContentGetHeight(int newWidth) {
 			: contentWidth;
 		newHeight += st::mediaInBubbleSkip
 			+ _reactions->resizeGetHeight(reactionsWidth);
-		if (hasOutLayout() && !delegate()->elementIsChatWide()) {
-			_reactions->flipToRight();
-		}
 	}
 
 	if (const auto keyboard = item->inlineReplyKeyboard()) {

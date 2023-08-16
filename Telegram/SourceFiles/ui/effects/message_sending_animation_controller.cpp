@@ -236,7 +236,6 @@ void Content::drawContent(Painter &p, float64 progress) const {
 
 	auto context = _toInfo.paintContext();
 	context.skipDrawingParts = Context::SkipDrawingParts::Surrounding;
-	context.outbg = currentView->hasOutLayout();
 	p.translate(-_innerContentRect.topLeft());
 	currentView->media()->draw(p, context);
 }
@@ -290,7 +289,6 @@ void Content::createSurrounding() {
 
 		auto context = _toInfo.paintContext();
 		context.skipDrawingParts = Context::SkipDrawingParts::Content;
-		context.outbg = currentView->hasOutLayout();
 
 		currentView->media()->draw(p, context);
 	}, _surrounding->lifetime());
@@ -307,9 +305,7 @@ void Content::createBubble() {
 	const auto innerGeometry = currentView->innerGeometry();
 
 	const auto tailWidth = st::historyBubbleTailOutLeft.width();
-	_bubble.offsetFromContent = QPoint(
-		currentView->hasOutLayout() ? 0 : tailWidth,
-		innerGeometry.y());
+	_bubble.offsetFromContent = QPoint(tailWidth, innerGeometry.y());
 
 	const auto scaleOffset = QPoint(0, innerGeometry.y());
 	const auto paintOffsetLeft = innerGeometry.x()
@@ -318,9 +314,7 @@ void Content::createBubble() {
 	const auto hasCommentsButton = currentView->data()->repliesAreComments()
 		|| currentView->data()->externalReply();
 	_bubble.widget->resize(innerGeometry.size()
-		+ QSize(
-			currentView->hasOutLayout() ? tailWidth : 0,
-			hasCommentsButton ? innerGeometry.y() : 0));
+		+ QSize(0, hasCommentsButton ? innerGeometry.y() : 0));
 	_bubble.widget->show();
 
 	_bubble.widget->stackUnder(this);

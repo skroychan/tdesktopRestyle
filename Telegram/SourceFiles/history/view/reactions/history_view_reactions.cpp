@@ -302,14 +302,6 @@ int InlineList::countNiceWidth() const {
 	return result;
 }
 
-void InlineList::flipToRight() {
-	_data.flags |= Data::Flag::Flipped;
-	for (auto &button : _buttons) {
-		button.geometry.moveLeft(
-			width() - button.geometry.x() - button.geometry.width());
-	}
-}
-
 int InlineList::placeAndResizeGetHeight(QRect available) {
 	const auto result = resizeGetHeight(available.width());
 	for (auto &button : _buttons) {
@@ -653,8 +645,7 @@ InlineListData InlineListDataFromMessage(not_null<Message*> message) {
 			}
 		}
 	}
-	result.flags = (message->hasOutLayout() ? Flag::OutLayout : Flag())
-		| (message->embedReactionsInBubble() ? Flag::InBubble : Flag());
+	result.flags = message->embedReactionsInBubble() ? Flag::InBubble : Flag();
 	return result;
 }
 

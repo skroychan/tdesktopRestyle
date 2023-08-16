@@ -2101,7 +2101,6 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 		if (!sendingAnimation.hasAnimatedMessage(item)) {
 			context.reactionInfo
 				= _reactionsManager->currentReactionPaintInfo();
-			context.outbg = view->hasOutLayout();
 			context.selection = itemRenderSelection(view);
 			view->draw(p, context);
 		}

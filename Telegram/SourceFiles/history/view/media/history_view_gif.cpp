@@ -387,14 +387,8 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 	const auto via = unwrapped ? item->Get<HistoryMessageVia>() : nullptr;
 	const auto reply = unwrapped ? _parent->displayedReply() : nullptr;
 	const auto forwarded = unwrapped ? item->Get<HistoryMessageForwarded>() : nullptr;
-	const auto rightAligned = unwrapped
-		&& outbg
-		&& !_parent->delegate()->elementIsChatWide();
 	if (via || reply || forwarded) {
 		usew = maxWidth() - additionalWidth(via, reply, forwarded);
-		if (rightAligned) {
-			usex = width() - usew;
-		}
 	}
 	if (isRound) {
 		accumulate_min(usew, painth);
@@ -663,7 +657,7 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 			if (reply) {
 				recth += st::msgReplyBarSize.height();
 			}
-			int rectx = rightAligned ? 0 : (usew + st::msgReplyPadding.left());
+			int rectx = usew + st::msgReplyPadding.left();
 			int recty = painty;
 			if (rtl()) rectx = width() - rectx - rectw;
 
@@ -724,7 +718,7 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 		} else {
 			maxRight -= st::msgMargin.left();
 		}
-		if (unwrapped && !rightAligned) {
+		if (unwrapped) {
 			auto infoWidth = _parent->infoWidth();
 
 			// This is just some arbitrary point,
@@ -746,7 +740,7 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 					: InfoDisplayType::Image));
 		}
 		if (const auto size = bubble ? std::nullopt : _parent->rightActionSize()
-			; size || (_transcribe && !rightAligned)) {
+			; size || _transcribe) {
 			const auto rightActionWidth = size
 				? size->width()
 				: _transcribe->size().width();
@@ -769,9 +763,6 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 			if (_transcribe) {
 				paintTranscribe(p, fastShareLeft, fastShareTop, true, context);
 			}
-		}
-		if (rightAligned && _transcribe) {
-			paintTranscribe(p, usex, fullBottom, false, context);
 		}
 	}
 }
@@ -990,7 +981,6 @@ TextState Gif::textState(QPoint point, StateRequest request) const {
 		}
 		painth -= st::mediaCaptionSkip;
 	}
-	const auto outbg = _parent->hasOutLayout();
 	const auto inWebPage = (_parent->media() != this);
 	const auto isRound = _data->isVideoMessage();
 	const auto unwrapped = isUnwrapped();
@@ -999,14 +989,8 @@ TextState Gif::textState(QPoint point, StateRequest request) const {
 	const auto via = unwrapped ? item->Get<HistoryMessageVia>() : nullptr;
 	const auto reply = unwrapped ? _parent->displayedReply() : nullptr;
 	const auto forwarded = unwrapped ? item->Get<HistoryMessageForwarded>() : nullptr;
-	const auto rightAligned = unwrapped
-		&& outbg
-		&& !_parent->delegate()->elementIsChatWide();
 	if (via || reply || forwarded) {
 		usew = maxWidth() - additionalWidth(via, reply, forwarded);
-		if (rightAligned) {
-			usex = width() - usew;
-		}
 	}
 	if (isRound) {
 		accumulate_min(usew, painth);
@@ -1027,7 +1011,7 @@ TextState Gif::textState(QPoint point, StateRequest request) const {
 		if (reply) {
 			recth += st::msgReplyBarSize.height();
 		}
-		auto rectx = rightAligned ? 0 : (usew + st::msgReplyPadding.left());
+		auto rectx = usew + st::msgReplyPadding.left();
 		auto recty = painty;
 		if (rtl()) rectx = width() - rectx - rectw;
 
@@ -1108,7 +1092,7 @@ TextState Gif::textState(QPoint point, StateRequest request) const {
 		} else {
 			maxRight -= st::msgMargin.left();
 		}
-		if (unwrapped && !rightAligned) {
+		if (unwrapped) {
 			auto infoWidth = _parent->infoWidth();
 
 			// This is just some arbitrary point,
@@ -1500,9 +1484,6 @@ QRect Gif::contentRectForReactions() const {
 	}
 	auto paintx = 0, painty = 0, paintw = width(), painth = height();
 	auto usex = 0, usew = paintw;
-	const auto outbg = _parent->hasOutLayout();
-	const auto rightAligned = outbg
-		&& !_parent->delegate()->elementIsChatWide();
 	const auto item = _parent->data();
 	const auto via = item->Get<HistoryMessageVia>();
 	const auto reply = _parent->displayedReply();
@@ -1511,9 +1492,6 @@ QRect Gif::contentRectForReactions() const {
 		usew = maxWidth() - additionalWidth(via, reply, forwarded);
 	}
 	accumulate_max(usew, _parent->reactionsOptimalWidth());
-	if (rightAligned) {
-		usex = width() - usew;
-	}
 	if (rtl()) usex = width() - usex - usew;
 	return style::rtlrect(usex + paintx, painty, usew, painth, width());
 }
@@ -1541,16 +1519,11 @@ QPoint Gif::resolveCustomInfoRightBottom() const {
 			maxRight -= st::msgMargin.left();
 		}
 		const auto infoWidth = _parent->infoWidth();
-		const auto outbg = _parent->hasOutLayout();
-		const auto rightAligned = outbg
-			&& !_parent->delegate()->elementIsChatWide();
-		if (!rightAligned) {
-			// This is just some arbitrary point,
-			// the main idea is to make info left aligned here.
-			fullRight += infoWidth - st::normalFont->height;
-			if (fullRight > maxRight) {
-				fullRight = maxRight;
-			}
+		// This is just some arbitrary point,
+		// the main idea is to make info left aligned here.
+		fullRight += infoWidth - st::normalFont->height;
+		if (fullRight > maxRight) {
+			fullRight = maxRight;
 		}
 	}
 	const auto skipx = unwrapped
