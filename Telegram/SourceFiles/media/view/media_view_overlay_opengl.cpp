@@ -255,6 +255,18 @@ void OverlayWidget::RendererGL::deinit(
 	_fillProgram = std::nullopt;
 	_controlsProgram = std::nullopt;
 	_contentBuffer = std::nullopt;
+	_controlsFadeImage.destroy(f);
+	_radialImage.destroy(f);
+	_documentBubbleImage.destroy(f);
+	_themePreviewImage.destroy(f);
+	_saveMsgImage.destroy(f);
+	_footerImage.destroy(f);
+	_captionImage.destroy(f);
+	_groupThumbsImage.destroy(f);
+	_controlsImage.destroy(f);
+	for (auto &part : _storiesSiblingParts) {
+		part.destroy(f);
+	}
 }
 
 void OverlayWidget::RendererGL::paint(
@@ -263,9 +275,10 @@ void OverlayWidget::RendererGL::paint(
 	if (handleHideWorkaround(f)) {
 		return;
 	}
-	const auto factor = widget->devicePixelRatio();
+	const auto factor = widget->devicePixelRatioF();
 	if (_factor != factor) {
 		_factor = factor;
+		_ifactor = int(std::ceil(factor));
 		_controlsImage.invalidate();
 
 		// We use the fact that fade texture atlas
@@ -763,10 +776,10 @@ void OverlayWidget::RendererGL::validateControls() {
 	maxWidth = std::max(st::mediaviewIconOver, maxWidth);
 	fullHeight += st::mediaviewIconOver;
 	auto image = QImage(
-		QSize(maxWidth, fullHeight) * _factor,
+		QSize(maxWidth, fullHeight) * _ifactor,
 		QImage::Format_ARGB32_Premultiplied);
 	image.fill(Qt::transparent);
-	image.setDevicePixelRatio(_factor);
+	image.setDevicePixelRatio(_ifactor);
 	{
 		auto p = QPainter(&image);
 		auto index = 0;
@@ -774,8 +787,8 @@ void OverlayWidget::RendererGL::validateControls() {
 		for (const auto &meta : metas) {
 			meta.icon->paint(p, 0, height, maxWidth);
 			_controlsTextures[index++] = QRect(
-				QPoint(0, height) * _factor,
-				meta.icon->size() * _factor);
+				QPoint(0, height) * _ifactor,
+				meta.icon->size() * _ifactor);
 			height += meta.icon->height();
 		}
 		auto hq = PainterHighQualityEnabler(p);
@@ -784,8 +797,8 @@ void OverlayWidget::RendererGL::validateControls() {
 		p.drawEllipse(
 			QRect(0, height, st::mediaviewIconOver, st::mediaviewIconOver));
 		_controlsTextures[index++] = QRect(
-			QPoint(0, height) * _factor,
-			QSize(st::mediaviewIconOver, st::mediaviewIconOver) * _factor);
+			QPoint(0, height) * _ifactor,
+			QSize(st::mediaviewIconOver, st::mediaviewIconOver) * _ifactor);
 		height += st::mediaviewIconOver;
 	}
 	_controlsImage.setImage(std::move(image));
@@ -817,10 +830,10 @@ void OverlayWidget::RendererGL::validateControlsFade() {
 	const auto height = bottomTop + bottom.height();
 
 	auto image = QImage(
-		QSize(width, height) * _factor,
+		QSize(width, height) * _ifactor,
 		QImage::Format_ARGB32_Premultiplied);
 	image.fill(Qt::transparent);
-	image.setDevicePixelRatio(_factor);
+	image.setDevicePixelRatio(_ifactor);
 
 	auto p = QPainter(&image);
 	top.paint(p, 0, 0, width);
@@ -1007,18 +1020,18 @@ void OverlayWidget::RendererGL::paintUsingRaster(
 		int bufferOffset,
 		bool transparent) {
 	auto raster = image.takeImage();
-	const auto size = rect.size() * _factor;
+	const auto size = rect.size() * _ifactor;
 	if (raster.width() < size.width() || raster.height() < size.height()) {
 		raster = QImage(size, QImage::Format_ARGB32_Premultiplied);
 		Assert(!raster.isNull());
-		raster.setDevicePixelRatio(_factor);
+		raster.setDevicePixelRatio(_ifactor);
 		if (!transparent
 			&& (raster.width() > size.width()
 				|| raster.height() > size.height())) {
 			raster.fill(Qt::transparent);
 		}
-	} else if (raster.devicePixelRatio() != _factor) {
-		raster.setDevicePixelRatio(_factor);
+	} else if (raster.devicePixelRatio() != _ifactor) {
+		raster.setDevicePixelRatio(_ifactor);
 	}
 
 	if (transparent) {

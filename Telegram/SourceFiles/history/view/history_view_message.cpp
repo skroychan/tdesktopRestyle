@@ -759,7 +759,9 @@ QSize Message::performCountOptimalSize() {
 					: item->hiddenSenderInfo()->nameText();
 				auto namew = st::msgPadding.left()
 					+ name.maxWidth()
-					+ (_fromNameStatus ? st::dialogsPremiumIcon.width() : 0)
+					+ (_fromNameStatus
+						? st::dialogsPremiumIcon.icon.width()
+						: 0)
 					+ st::msgPadding.right();
 				if (via && !displayForwardedFrom()) {
 					namew += st::msgServiceFont->spacew + via->maxWidth
@@ -1026,9 +1028,13 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 
 		auto trect = inner.marginsRemoved(st::msgPadding);
 
-		const auto reactionsTop = (reactionsInBubble && !_viewButton)
-			? st::mediaInBubbleSkip
+		const auto additionalInfoSkip = (mediaDisplayed
+			&& !media->additionalInfoString().isEmpty())
+			? st::msgDateFont->height
 			: 0;
+		const auto reactionsTop = (reactionsInBubble && !_viewButton)
+			? (additionalInfoSkip + st::mediaInBubbleSkip)
+			: additionalInfoSkip;
 		const auto reactionsHeight = reactionsInBubble
 			? (reactionsTop + _reactions->height())
 			: 0;
@@ -1353,7 +1359,7 @@ void Message::paintFromName(
 		return &info->nameText();
 	}();
 	const auto statusWidth = _fromNameStatus
-		? st::dialogsPremiumIcon.width()
+		? st::dialogsPremiumIcon.icon.width()
 		: 0;
 	if (statusWidth && availableWidth > statusWidth) {
 		const auto x = availableLeft
@@ -1393,7 +1399,7 @@ void Message::paintFromName(
 				.paused = context.paused || On(PowerSaving::kEmojiStatus),
 			});
 		} else {
-			st::dialogsPremiumIcon.paint(p, x, y, width(), color);
+			st::dialogsPremiumIcon.icon.paint(p, x, y, width(), color);
 		}
 		availableWidth -= statusWidth;
 	}
@@ -1402,7 +1408,8 @@ void Message::paintFromName(
 	nameText->drawElided(p, availableLeft, trect.top(), availableWidth);
 	const auto skipWidth = nameText->maxWidth()
 		+ (_fromNameStatus
-			? (st::dialogsPremiumIcon.width() + st::msgServiceFont->spacew)
+			? (st::dialogsPremiumIcon.icon.width()
+				+ st::msgServiceFont->spacew)
 			: 0)
 		+ st::msgServiceFont->spacew;
 	availableLeft += skipWidth;
@@ -2044,9 +2051,13 @@ TextState Message::textState(
 			return result;
 		}
 		auto trect = inner.marginsRemoved(st::msgPadding);
-		const auto reactionsTop = (reactionsInBubble && !_viewButton)
-			? st::mediaInBubbleSkip
+		const auto additionalInfoSkip = (mediaDisplayed
+			&& !media->additionalInfoString().isEmpty())
+			? st::msgDateFont->height
 			: 0;
+		const auto reactionsTop = (reactionsInBubble && !_viewButton)
+			? (additionalInfoSkip + st::mediaInBubbleSkip)
+			: additionalInfoSkip;
 		const auto reactionsHeight = reactionsInBubble
 			? (reactionsTop + _reactions->height())
 			: 0;
@@ -3507,7 +3518,7 @@ void Message::fromNameUpdated(int width) const {
 				- st::msgPadding.right()
 				- nameText->maxWidth()
 				+ (_fromNameStatus
-					? (st::dialogsPremiumIcon.width()
+					? (st::dialogsPremiumIcon.icon.width()
 						+ st::msgServiceFont->spacew)
 					: 0)
 				- st::msgServiceFont->spacew);
@@ -3761,6 +3772,10 @@ int Message::resizeContentGetHeight(int newWidth) {
 			if (reactionsInBubble) {
 				if (!mediaDisplayed || _viewButton) {
 					newHeight += st::mediaInBubbleSkip;
+				} else if (!media->additionalInfoString().isEmpty()) {
+					// In round videos in a web page status text is painted
+					// in the bottom left corner, reactions should be below.
+					newHeight += st::msgDateFont->height;
 				}
 				newHeight += _reactions->height();
 			}
