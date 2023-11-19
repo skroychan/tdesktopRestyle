@@ -260,7 +260,7 @@ void PaintFolderEntryText(
 		.now = context.now,
 		.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
 		.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
-		.elisionLines = rect.height() / st::dialogsTextFont->height,
+		.elisionHeight = rect.height(),
 	});
 }
 
@@ -462,13 +462,13 @@ void PaintRow(
 			auto &cache = thread->cloudDraftTextCache();
 			if (cache.isEmpty()) {
 				using namespace TextUtilities;
-				auto draftWrapped = Text::PlainLink(
+				auto draftWrapped = Text::Colorized(
 					tr::lng_dialogs_text_from_wrapped(
 						tr::now,
 						lt_from,
 						tr::lng_from_draft(tr::now)));
 				auto draftText = supportMode
-					? Text::PlainLink(
+					? Text::Colorized(
 						Support::ChatOccupiedString(history))
 					: tr::lng_dialogs_text_with_from(
 						tr::now,
@@ -879,7 +879,7 @@ void RowPainter::Paint(
 		}
 		return nullptr;
 	}();
-	const auto previewOptions = [&]() -> HistoryView::ToPreviewOptions {
+	auto previewOptions = [&]() -> HistoryView::ToPreviewOptions {
 		if (topic) {
 			return {};
 		} else if (const auto searchChat = row->searchInChat()) {
@@ -891,6 +891,7 @@ void RowPainter::Paint(
 		}
 		return {};
 	}();
+	previewOptions.ignoreGroup = true;
 
 	const auto badgesState = context.displayUnreadInfo
 		? entry->chatListBadgesState()

@@ -997,7 +997,8 @@ void ApplyChannelUpdate(
 		| Flag::PreHistoryHidden
 		| Flag::AntiSpam
 		| Flag::Location
-		| Flag::ParticipantsHidden;
+		| Flag::ParticipantsHidden
+		| Flag::CanGetStatistics;
 	channel->setFlags((channel->flags() & ~mask)
 		| (update.is_can_set_username() ? Flag::CanSetUsername : Flag())
 		| (update.is_can_view_participants()
@@ -1009,7 +1010,8 @@ void ApplyChannelUpdate(
 		| (update.vlocation() ? Flag::Location : Flag())
 		| (update.is_participants_hidden()
 			? Flag::ParticipantsHidden
-			: Flag()));
+			: Flag())
+		| (update.is_can_view_stats() ? Flag::CanGetStatistics : Flag()));
 	channel->setUserpicPhoto(update.vchat_photo());
 	if (const auto migratedFrom = update.vmigrated_from_chat_id()) {
 		channel->addFlags(Flag::Megagroup);
@@ -1117,6 +1119,10 @@ void ApplyChannelUpdate(
 	channel->owner().notifySettings().apply(
 		channel,
 		update.vnotify_settings());
+
+	if (update.vstats_dc()) {
+		channel->owner().applyStatsDcId(channel, update.vstats_dc()->v);
+	}
 
 	if (const auto sendAs = update.vdefault_send_as()) {
 		session->sendAsPeers().setChosen(channel, peerFromMTP(*sendAs));

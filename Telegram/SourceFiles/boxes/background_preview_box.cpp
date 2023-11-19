@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/painter.h"
+#include "ui/vertical_list.h"
 #include "ui/ui_utility.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -37,13 +38,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/background_preview_box.h"
 #include "window/window_session_controller.h"
 #include "window/themes/window_themes_embedded.h"
-#include "settings/settings_common.h"
 #include "storage/file_upload.h"
 #include "storage/localimageloader.h"
 #include "styles/style_chat.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
-#include "styles/style_settings.h"
 
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
@@ -175,7 +174,8 @@ BackgroundPreviewBox::BackgroundPreviewBox(
 , _controller(controller)
 , _forPeer(args.forPeer)
 , _fromMessageId(args.fromMessageId)
-, _chatStyle(std::make_unique<Ui::ChatStyle>())
+, _chatStyle(std::make_unique<Ui::ChatStyle>(
+	controller->session().colorIndicesValue()))
 , _serviceHistory(_controller->session().data().history(
 	PeerData::kServiceNotificationsId))
 , _service(nullptr)
@@ -292,10 +292,10 @@ void BackgroundPreviewBox::createDimmingSlider(bool dark) {
 	const auto equals = (dark == Window::Theme::IsNightMode());
 	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(_dimmingContent);
 	inner->show();
-	Settings::AddSubsectionTitle(
+	Ui::AddSubsectionTitle(
 		inner,
 		tr::lng_background_dimming(),
-		style::margins(0, st::settingsSectionSkip, 0, 0),
+		style::margins(0, st::defaultVerticalListSkip, 0, 0),
 		equals ? nullptr : dark ? &_dark->subtitle : &_light->subtitle);
 	_dimmingSlider = inner->add(
 		object_ptr<Ui::MediaSlider>(
@@ -377,7 +377,7 @@ auto BackgroundPreviewBox::prepareOverridenStyle(bool dark)
 		.box = st::defaultBox,
 		.toggle = toggle,
 		.slider = st::defaultContinuousSlider,
-		.subtitle = st::settingsSubsectionTitle,
+		.subtitle = st::defaultSubsectionTitle,
 	};
 	result.box.button.textFg = p->lightButtonFg();
 	result.box.button.textFgOver = p->lightButtonFgOver();
@@ -434,7 +434,7 @@ void BackgroundPreviewBox::rebuildButtons(bool dark) {
 	clearButtons();
 	addButton(_forPeer
 		? tr::lng_background_apply_button()
-		: tr::lng_background_apply(), [=] { apply(); });
+		: tr::lng_settings_apply(), [=] { apply(); });
 	addButton(tr::lng_cancel(), [=] { closeBox(); });
 	if (!_forPeer && _paper.hasShareUrl()) {
 		addLeftButton(tr::lng_background_share(), [=] { share(); });

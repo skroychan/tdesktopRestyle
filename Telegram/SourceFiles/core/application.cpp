@@ -90,6 +90,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export/export_manager.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
+#include "boxes/abstract_box.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
 #include "boxes/connection_box.h"
@@ -512,14 +513,16 @@ void Application::startMediaView() {
 	InvokeQueued(this, [=] {
 		_mediaView = std::make_unique<Media::View::OverlayWidget>();
 	});
-#else // Q_OS_MAC
+#elif defined Q_OS_WIN // Q_OS_MAC || Q_OS_WIN
 	// On Windows we needed such hack for the main window, otherwise
 	// somewhere inside the media viewer creating code its geometry
 	// was broken / lost to some invalid values.
 	const auto current = _lastActivePrimaryWindow->widget()->geometry();
 	_mediaView = std::make_unique<Media::View::OverlayWidget>();
 	_lastActivePrimaryWindow->widget()->Ui::RpWidget::setGeometry(current);
-#endif // Q_OS_MAC
+#else
+	_mediaView = std::make_unique<Media::View::OverlayWidget>();
+#endif // Q_OS_MAC || Q_OS_WIN
 }
 
 void Application::startTray() {

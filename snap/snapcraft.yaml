@@ -102,7 +102,8 @@ parts:
       - python3
       - libasound2-dev
       - libavif-dev
-      - libboost-program-options-dev
+      - libboost-program-options1.74-dev
+      - libboost-regex1.74-dev
       - libfmt-dev
       - libgirepository1.0-dev
       - libheif-dev
@@ -118,6 +119,7 @@ parts:
     stage-packages:
       - libasound2
       - libavif13
+      - libboost-regex1.74.0
       - libheif1
       - libopus0
       - libpulse0
@@ -180,6 +182,18 @@ parts:
       rm -rf patches
     stage: [-./*]
 
+  meson-deps:
+    source: https://github.com/mesonbuild/meson.git
+    source-depth: 1
+    source-branch: 1.2.3
+    plugin: nil
+    build-packages:
+      - python3-pip
+      - ninja-build
+    override-build: |
+      pip install .
+    stage: [-./*]
+
   desktop-qt:
     source: https://github.com/desktop-app/snapcraft-desktop-helpers.git
     source-subdir: qt
@@ -196,6 +210,7 @@ parts:
     stage-packages:
       - libc-bin
       - libgdk-pixbuf-2.0-0
+      - libnvidia-egl-wayland1
       - libxkbcommon0
       - locales-all
       - shared-mime-info
@@ -250,7 +265,6 @@ parts:
     source-tag: 2.78.0
     plugin: meson
     build-packages:
-      - meson
       - mm-common
       - ninja-build
       - libxml-parser-perl
@@ -263,10 +277,14 @@ parts:
       - -Dsigc++-3.0:build-documentation=false
       - -Dsigc++-3.0:build-examples=false
       - -Dsigc++-3.0:validation=false
+      - -Dglib:tests=false
+      - -Dglib:introspection=disabled
     prime:
       - -./usr/include
       - -./usr/lib/$CRAFT_ARCH_TRIPLET/pkgconfig
       - -./usr/lib/$CRAFT_ARCH_TRIPLET/*.so
+    after:
+      - meson-deps
 
   libjxl:
     source: https://github.com/libjxl/libjxl.git
@@ -460,14 +478,19 @@ parts:
       - libxkbcommon-x11-0
       - zlib1g
     override-pull: |
-      QT=6.5.2
+      QT=6.6.0
 
       git clone -b v${QT} --depth=1 https://code.qt.io/qt/qt5.git .
       git submodule update --init --recursive --depth=1 qtbase qtdeclarative qtwayland qtimageformats qtsvg qtshadertools
 
       cd qtbase
       find $CRAFT_STAGE/patches/qtbase_${QT} -type f -print0 | sort -z | xargs -r0 git apply
+      cd ../qtsvg
+      git fetch origin v6.5.3
+      git checkout FETCH_HEAD
       cd ../qtwayland
+      git fetch origin aae65c885d8e38d8abc2959cded7b5e9e5fc88b3
+      git cherry-pick -n FETCH_HEAD
       sed -i 's/qMin(version, 8)/qMin(version, 7)/' src/client/qwaylandinputdevice.cpp
       cd ..
     override-build: |

@@ -29,18 +29,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
-#include "settings/settings_common.h"
-#include "settings/settings_premium.h"
+#include "settings/settings_common_session.h"
 #include "ui/abstract_button.h"
 #include "ui/basic_click_handlers.h"
-#include "ui/color_contrast.h"
 #include "ui/effects/gradient.h"
 #include "ui/effects/premium_graphics.h"
 #include "ui/effects/premium_stars_colored.h"
+#include "ui/effects/premium_top_bar.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/format_values.h"
 #include "ui/text/text_utilities.h"
-#include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "ui/widgets/checkbox.h" // Ui::RadiobuttonGroup.
 #include "ui/widgets/gradient_round_button.h"
 #include "ui/widgets/labels.h"
@@ -50,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "ui/painter.h"
 #include "ui/power_saving.h"
+#include "ui/vertical_list.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "base/unixtime.h"
@@ -66,41 +66,6 @@ namespace Settings {
 namespace {
 
 using SectionCustomTopBarData = Info::Settings::SectionCustomTopBarData;
-
-constexpr auto kBodyAnimationPart = 0.90;
-constexpr auto kTitleAdditionalScale = 0.15;
-constexpr auto kMinAcceptableContrast = 4.5; // 1.14;
-
-[[nodiscard]] QString Svg() {
-	return u":/gui/icons/settings/star.svg"_q;
-}
-
-[[nodiscard]] QByteArray ColorizedSvg() {
-	auto f = QFile(Svg());
-	if (!f.open(QIODevice::ReadOnly)) {
-		return QByteArray();
-	}
-	auto content = qs(f.readAll());
-	auto stops = [] {
-		auto s = QString();
-		for (const auto &stop : Ui::Premium::ButtonGradientStops()) {
-			s += QString("<stop offset='%1' stop-color='%2'/>")
-				.arg(QString::number(stop.first), stop.second.name());
-		}
-		return s;
-	}();
-	const auto color = QString("<linearGradient id='Gradient2' "
-		"x1='%1' x2='%2' y1='%3' y2='%4'>%5</linearGradient>")
-		.arg(0)
-		.arg(1)
-		.arg(1)
-		.arg(0)
-		.arg(std::move(stops));
-	content.replace(u"gradientPlaceholder"_q, color);
-	content.replace(u"#fff"_q, u"url(#Gradient2)"_q);
-	f.close();
-	return content.toUtf8();
-}
 
 [[nodiscard]] Data::SubscriptionOptions SubscriptionOptionsForRows(
 		Data::SubscriptionOptions result) {
@@ -412,85 +377,6 @@ void SendScreenAccept(not_null<Window::SessionController*> controller) {
 		MTP_jsonNull());
 }
 
-class TopBarAbstract : public Ui::RpWidget {
-public:
-	using Ui::RpWidget::RpWidget;
-
-	void setRoundEdges(bool value);
-
-	virtual void setPaused(bool paused) = 0;
-	virtual void setTextPosition(int x, int y) = 0;
-
-	[[nodiscard]] virtual rpl::producer<int> additionalHeight() const = 0;
-
-protected:
-	void paintEdges(QPainter &p, const QBrush &brush) const;
-	void paintEdges(QPainter &p) const;
-
-	[[nodiscard]] QRectF starRect(
-		float64 topProgress,
-		float64 sizeProgress) const;
-
-	[[nodiscard]] bool isDark() const;
-	void computeIsDark();
-
-private:
-	bool _roundEdges = true;
-	bool _isDark = false;
-
-};
-
-void TopBarAbstract::setRoundEdges(bool value) {
-	_roundEdges = value;
-	update();
-}
-
-void TopBarAbstract::paintEdges(QPainter &p, const QBrush &brush) const {
-	const auto r = rect();
-	if (_roundEdges) {
-		PainterHighQualityEnabler hq(p);
-		const auto radius = st::boxRadius;
-		p.setPen(Qt::NoPen);
-		p.setBrush(brush);
-		p.drawRoundedRect(
-			r + QMargins{ 0, 0, 0, radius + 1 },
-			radius,
-			radius);
-	} else {
-		p.fillRect(r, brush);
-	}
-}
-
-void TopBarAbstract::paintEdges(QPainter &p) const {
-	paintEdges(p, st::boxBg);
-	if (isDark()) {
-		paintEdges(p, st::shadowFg);
-		paintEdges(p, st::shadowFg);
-	}
-}
-
-QRectF TopBarAbstract::starRect(
-		float64 topProgress,
-		float64 sizeProgress) const {
-	const auto starSize = st::settingsPremiumStarSize * sizeProgress;
-	return QRectF(
-		QPointF(
-			(width() - starSize.width()) / 2,
-			st::settingsPremiumStarTopSkip * topProgress),
-		starSize);
-};
-
-bool TopBarAbstract::isDark() const {
-	return _isDark;
-}
-
-void TopBarAbstract::computeIsDark() {
-	const auto contrast = Ui::CountContrast(
-		st::boxBg->c,
-		st::premiumButtonFg->c);
-	_isDark = (contrast > kMinAcceptableContrast);
-}
-
 class EmojiStatusTopBar final {
 public:
 	EmojiStatusTopBar(
@@ -583,7 +469,7 @@ void EmojiStatusTopBar::paint(QPainter &p) {
 	}
 }
 
-class TopBarUser final : public TopBarAbstract {
+class TopBarUser final : public Ui::Premium::TopBarAbstract {
 public:
 	TopBarUser(
 		not_null<QWidget*> parent,
@@ -632,11 +518,11 @@ TopBarUser::TopBarUser(
 	not_null<Window::SessionController*> controller,
 	not_null<PeerData*> peer,
 	rpl::producer<> showFinished)
-: TopBarAbstract(parent)
+: TopBarAbstract(parent, st::userPremiumCover)
 , _content(this)
 , _title(_content, st::settingsPremiumUserTitle)
-, _about(_content, st::settingsPremiumUserAbout)
-, _ministars(_content)
+, _about(_content, st::userPremiumCover.about)
+, _ministars(_content, true)
 , _smallTop({
 	.widget = object_ptr<Ui::RpWidget>(this),
 	.text = Ui::Text::String(
@@ -674,38 +560,8 @@ TopBarUser::TopBarUser(
 				HistoryView::Sticker::EmojiSize());
 			_imageStar = QImage();
 		} else {
-			auto svg = QSvgRenderer(Svg());
-
-			const auto size = _starRect.size().toSize();
-			auto frame = QImage(
-				size * style::DevicePixelRatio(),
-				QImage::Format_ARGB32_Premultiplied);
-			frame.setDevicePixelRatio(style::DevicePixelRatio());
-
-			auto mask = frame;
-			mask.fill(Qt::transparent);
-			{
-				auto p = QPainter(&mask);
-				auto gradient = QLinearGradient(
-					0,
-					size.height(),
-					size.width(),
-					0);
-				gradient.setStops(Ui::Premium::ButtonGradientStops());
-				p.setPen(Qt::NoPen);
-				p.setBrush(gradient);
-				p.drawRect(0, 0, size.width(), size.height());
-			}
-			frame.fill(Qt::transparent);
-			{
-				auto q = QPainter(&frame);
-				svg.render(&q, QRect(QPoint(), size));
-				q.setCompositionMode(QPainter::CompositionMode_SourceIn);
-				q.drawImage(0, 0, mask);
-			}
-			_imageStar = std::move(frame);
-
 			_emojiStatus = nullptr;
+			_imageStar = Ui::Premium::GenerateStarForLightTopBar(_starRect);
 		}
 
 		updateTitle(document, { name }, controller);
@@ -925,194 +781,6 @@ void TopBarUser::resizeEvent(QResizeEvent *e) {
 	}
 }
 
-class TopBar final : public TopBarAbstract {
-public:
-	TopBar(
-		not_null<QWidget*> parent,
-		not_null<Window::SessionController*> controller,
-		rpl::producer<QString> title,
-		rpl::producer<TextWithEntities> about);
-
-	void setPaused(bool paused) override;
-	void setTextPosition(int x, int y) override;
-
-	rpl::producer<int> additionalHeight() const override;
-
-protected:
-	void paintEvent(QPaintEvent *e) override;
-	void resizeEvent(QResizeEvent *e) override;
-
-private:
-	const style::font &_titleFont;
-	const style::margins &_titlePadding;
-	object_ptr<Ui::FlatLabel> _about;
-	Ui::Premium::ColoredMiniStars _ministars;
-	QSvgRenderer _star;
-
-	struct {
-		float64 top = 0.;
-		float64 body = 0.;
-		float64 title = 0.;
-		float64 scaleTitle = 0.;
-	} _progress;
-
-	QRectF _starRect;
-
-	QPoint _titlePosition;
-	QPainterPath _titlePath;
-
-};
-
-TopBar::TopBar(
-	not_null<QWidget*> parent,
-	not_null<Window::SessionController*> controller,
-	rpl::producer<QString> title,
-	rpl::producer<TextWithEntities> about)
-: TopBarAbstract(parent)
-, _titleFont(st::boxTitle.style.font)
-, _titlePadding(st::settingsPremiumTitlePadding)
-, _about(this, std::move(about), st::settingsPremiumAbout)
-, _ministars(this) {
-	std::move(
-		title
-	) | rpl::start_with_next([=](QString text) {
-		_titlePath = QPainterPath();
-		_titlePath.addText(0, _titleFont->ascent, _titleFont, text);
-		update();
-	}, lifetime());
-
-	_about->setClickHandlerFilter([=](
-			const ClickHandlerPtr &handler,
-			Qt::MouseButton button) {
-		ActivateClickHandler(_about, handler, {
-			button,
-			QVariant::fromValue(ClickHandlerContext{
-				.sessionWindow = base::make_weak(controller),
-				.botStartAutoSubmit = true,
-			})
-		});
-		return false;
-	});
-
-	rpl::single() | rpl::then(
-		style::PaletteChanged()
-	) | rpl::start_with_next([=] {
-		TopBarAbstract::computeIsDark();
-
-		if (!TopBarAbstract::isDark()) {
-			_star.load(Svg());
-			_ministars.setColorOverride(st::premiumButtonFg->c);
-		} else {
-			_star.load(ColorizedSvg());
-			_ministars.setColorOverride(std::nullopt);
-		}
-		auto event = QResizeEvent(size(), size());
-		resizeEvent(&event);
-	}, lifetime());
-}
-
-void TopBar::setPaused(bool paused) {
-	_ministars.setPaused(paused);
-}
-
-void TopBar::setTextPosition(int x, int y) {
-	_titlePosition = { x, y };
-}
-
-rpl::producer<int> TopBar::additionalHeight() const {
-	return _about->heightValue(
-	) | rpl::map([l = st::settingsPremiumAbout.style.lineHeight](int height) {
-		return std::max(height - l * 2, 0);
-	});
-}
-
-void TopBar::resizeEvent(QResizeEvent *e) {
-	const auto progress = (e->size().height() - minimumHeight())
-		/ float64(maximumHeight() - minimumHeight());
-	_progress.top = 1. -
-		std::clamp(
-			(1. - progress) / kBodyAnimationPart,
-			0.,
-			1.);
-	_progress.body = _progress.top;
-	_progress.title = 1. - progress;
-	_progress.scaleTitle = 1. + kTitleAdditionalScale * progress;
-
-	_ministars.setCenter(starRect(_progress.top, 1.).toRect());
-
-	_starRect = starRect(_progress.top, _progress.body);
-
-	const auto &padding = st::boxRowPadding;
-	const auto availableWidth = width() - padding.left() - padding.right();
-	const auto titleTop = _starRect.top()
-		+ _starRect.height()
-		+ _titlePadding.top();
-	const auto titlePathRect = _titlePath.boundingRect();
-	const auto aboutTop = titleTop
-		+ titlePathRect.height()
-		+ _titlePadding.bottom();
-	_about->resizeToWidth(availableWidth);
-	_about->moveToLeft(padding.left(), aboutTop);
-	_about->setOpacity(_progress.body);
-
-	Ui::RpWidget::resizeEvent(e);
-}
-
-void TopBar::paintEvent(QPaintEvent *e) {
-	auto p = QPainter(this);
-
-	p.fillRect(e->rect(), Qt::transparent);
-
-	const auto r = rect();
-
-	if (!TopBarAbstract::isDark()) {
-		const auto gradientPointTop = r.height() / 3. * 2.;
-		auto gradient = QLinearGradient(
-			QPointF(0, gradientPointTop),
-			QPointF(r.width(), r.height() - gradientPointTop));
-		gradient.setStops(Ui::Premium::ButtonGradientStops());
-
-		TopBarAbstract::paintEdges(p, gradient);
-	} else {
-		TopBarAbstract::paintEdges(p);
-	}
-
-	p.setOpacity(_progress.body);
-	p.translate(_starRect.center());
-	p.scale(_progress.body, _progress.body);
-	p.translate(-_starRect.center());
-	if (_progress.top) {
-		_ministars.paint(p);
-	}
-	p.resetTransform();
-
-	_star.render(&p, _starRect);
-
-	p.setPen(st::premiumButtonFg);
-
-	const auto titlePathRect = _titlePath.boundingRect();
-
-	// Title.
-	PainterHighQualityEnabler hq(p);
-	p.setOpacity(1.);
-	p.setFont(_titleFont);
-	const auto fullStarRect = starRect(1., 1.);
-	const auto fullTitleTop = fullStarRect.top()
-		+ fullStarRect.height()
-		+ _titlePadding.top();
-	p.translate(
-		anim::interpolate(
-			(width() - titlePathRect.width()) / 2,
-			_titlePosition.x(),
-			_progress.title),
-		anim::interpolate(fullTitleTop, _titlePosition.y(), _progress.title));
-
-	p.translate(titlePathRect.center());
-	p.scale(_progress.scaleTitle, _progress.scaleTitle);
-	p.translate(-titlePathRect.center());
-	p.fillPath(_titlePath, st::premiumButtonFg);
-}
-
 class Premium : public Section<Premium> {
 public:
 	Premium(
@@ -1203,7 +871,7 @@ void Premium::setupSubscriptionOptions(
 			object_ptr<Ui::VerticalLayout>(container)));
 	const auto content = options->entity();
 
-	AddSkip(content, st::settingsPremiumOptionsPadding.top());
+	Ui::AddSkip(content, st::settingsPremiumOptionsPadding.top());
 
 	const auto apiPremium = &_controller->session().api().premium();
 	Ui::Premium::AddGiftOptions(
@@ -1213,13 +881,13 @@ void Premium::setupSubscriptionOptions(
 		st::premiumSubscriptionOption,
 		true);
 
-	AddSkip(content, st::settingsPremiumOptionsPadding.bottom());
-	AddDivider(content);
+	Ui::AddSkip(content, st::settingsPremiumOptionsPadding.bottom());
+	Ui::AddDivider(content);
 
 	const auto lastSkip = TopTransitionSkip() * (isEmojiStatus ? 1 : 2);
 
-	AddSkip(content, lastSkip - st::settingsSectionSkip);
-	AddSkip(skip->entity(), lastSkip);
+	Ui::AddSkip(content, lastSkip - st::defaultVerticalListSkip);
+	Ui::AddSkip(skip->entity(), lastSkip);
 
 	auto toggleOn = rpl::combine(
 		Data::AmPremiumValue(&_controller->session()),
@@ -1420,11 +1088,11 @@ void Premium::setupContent() {
 			{ .icon = icons[i], .backgroundBrush = brush });
 	}
 
-	AddSkip(content, descriptionPadding.bottom());
+	Ui::AddSkip(content, descriptionPadding.bottom());
 #if 0
-	AddSkip(content);
-	AddDivider(content);
-	AddSkip(content);
+	Ui::AddSkip(content);
+	Ui::AddDivider(content);
+	Ui::AddSkip(content);
 
 	content->add(
 		object_ptr<Ui::FlatLabel>(
@@ -1432,14 +1100,16 @@ void Premium::setupContent() {
 			tr::lng_premium_summary_bottom_subtitle(
 			) | rpl::map(Ui::Text::Bold),
 			stLabel),
-		st::settingsSubsectionTitlePadding);
+		st::defaultSubsectionTitlePadding);
 	content->add(
 		object_ptr<Ui::FlatLabel>(
 			content,
 			tr::lng_premium_summary_bottom_about(Ui::Text::RichLangValue),
 			st::aboutLabel),
 		st::boxRowPadding);
-	AddSkip(content, stDefault.padding.top() + stDefault.padding.bottom());
+	Ui::AddSkip(
+		content,
+		stDefault.padding.top() + stDefault.padding.bottom());
 #endif
 
 	Ui::ResizeFitChild(this, content);
@@ -1488,7 +1158,7 @@ QPointer<Ui::RpWidget> Premium::createPinnedToTop(
 		return nullptr;
 	}();
 
-	const auto content = [&]() -> TopBarAbstract* {
+	const auto content = [&]() -> Ui::Premium::TopBarAbstract* {
 		if (peerWithPremium) {
 			return Ui::CreateChild<TopBarUser>(
 				parent.get(),
@@ -1496,9 +1166,17 @@ QPointer<Ui::RpWidget> Premium::createPinnedToTop(
 				peerWithPremium,
 				_showFinished.events());
 		}
-		return Ui::CreateChild<TopBar>(
+		const auto weak = base::make_weak(_controller);
+		const auto clickContextOther = [=] {
+			return QVariant::fromValue(ClickHandlerContext{
+				.sessionWindow = weak,
+				.botStartAutoSubmit = true,
+			});
+		};
+		return Ui::CreateChild<Ui::Premium::TopBar>(
 			parent.get(),
-			_controller,
+			st::defaultPremiumCover,
+			clickContextOther,
 			std::move(title),
 			std::move(about));
 	}();
@@ -1696,6 +1374,24 @@ QPointer<Ui::RpWidget> Premium::createPinnedToBottom(
 
 } // namespace
 
+template <>
+struct SectionFactory<Premium> : AbstractSectionFactory {
+	object_ptr<AbstractSection> create(
+		not_null<QWidget*> parent,
+		not_null<Window::SessionController*> controller
+	) const final override {
+		return object_ptr<Premium>(parent, controller);
+	}
+	bool hasCustomTopBar() const final override {
+		return true;
+	}
+
+	[[nodiscard]] static const std::shared_ptr<SectionFactory> &Instance() {
+		static const auto result = std::make_shared<SectionFactory>();
+		return result;
+	}
+};
+
 Type PremiumId() {
 	return Premium::Id();
 }
@@ -1770,6 +1466,36 @@ QString LookupPremiumRef(PremiumPreview section) {
 		}
 	}
 	return QString();
+}
+
+void ShowPremiumPromoToast(
+		std::shared_ptr<ChatHelpers::Show> show,
+		TextWithEntities textWithLink,
+		const QString &ref) {
+	using WeakToast = base::weak_ptr<Ui::Toast::Instance>;
+	const auto toast = std::make_shared<WeakToast>();
+	(*toast) = show->showToast({
+		.text = std::move(textWithLink),
+		.st = &st::defaultMultilineToast,
+		.duration = Ui::Toast::kDefaultDuration * 2,
+		.multiline = true,
+		.filter = crl::guard(&show->session(), [=](
+				const ClickHandlerPtr &,
+				Qt::MouseButton button) {
+			if (button == Qt::LeftButton) {
+				if (const auto strong = toast->get()) {
+					strong->hideAnimated();
+					(*toast) = nullptr;
+					if (const auto controller = show->resolveWindow(
+							ChatHelpers::WindowUsage::PremiumPromo)) {
+						Settings::ShowPremium(controller, ref);
+					}
+					return true;
+				}
+			}
+			return false;
+		}),
+	});
 }
 
 not_null<Ui::GradientButton*> CreateSubscribeButton(

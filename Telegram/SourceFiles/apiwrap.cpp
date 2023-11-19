@@ -114,6 +114,7 @@ constexpr auto kStickersByEmojiInvalidateTimeout = crl::time(6 * 1000);
 constexpr auto kNotifySettingSaveTimeout = crl::time(1000);
 constexpr auto kDialogsFirstLoad = 20;
 constexpr auto kDialogsPerPage = 500;
+constexpr auto kStatsSessionKillTimeout = 10 * crl::time(1000);
 
 using PhotoFileLocationId = Data::PhotoFileLocationId;
 using DocumentFileLocationId = Data::DocumentFileLocationId;
@@ -159,6 +160,7 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _fileLoader(std::make_unique<TaskQueue>(kFileLoaderQueueStopTimeout))
 , _topPromotionTimer([=] { refreshTopPromotion(); })
 , _updateNotifyTimer([=] { sendNotifySettingsUpdates(); })
+, _statsSessionKillTimer([=] { checkStatsSessions(); })
 , _authorizations(std::make_unique<Api::Authorizations>(this))
 , _attachedStickers(std::make_unique<Api::AttachedStickers>(this))
 , _blockedPeers(std::make_unique<Api::BlockedPeers>(this))
@@ -776,10 +778,9 @@ QString ApiWrap::exportDirectMessageLink(
 
 QString ApiWrap::exportDirectStoryLink(not_null<Data::Story*> story) {
 	const auto storyId = story->fullId();
-	const auto user = story->peer()->asUser();
-	Assert(user != nullptr);
+	const auto peer = story->peer();
 	const auto fallback = [&] {
-		const auto base = user->username();
+		const auto base = peer->userName();
 		const auto story = QString::number(storyId.story);
 		const auto query = base + "/s/" + story;
 		return session().createInternalLinkFull(query);
@@ -789,7 +790,7 @@ QString ApiWrap::exportDirectStoryLink(not_null<Data::Story*> story) {
 		? i->second
 		: fallback();
 	request(MTPstories_ExportStoryLink(
-		story->peer()->input,
+		peer->input,
 		MTP_int(story->id())
 	)).done([=](const MTPExportedStoryLink &result) {
 		const auto link = qs(result.data().vlink());
@@ -2136,14 +2137,13 @@ void ApiWrap::saveDraftsToCloud() {
 
 		auto flags = MTPmessages_SaveDraft::Flags(0);
 		auto &textWithTags = cloudDraft->textWithTags;
-		if (cloudDraft->previewState != Data::PreviewState::Allowed) {
+		if (cloudDraft->webpage.removed) {
 			flags |= MTPmessages_SaveDraft::Flag::f_no_webpage;
+		} else if (!cloudDraft->webpage.url.isEmpty()) {
+			flags |= MTPmessages_SaveDraft::Flag::f_media;
 		}
-		if (cloudDraft->msgId) {
-			flags |= MTPmessages_SaveDraft::Flag::f_reply_to_msg_id;
-		}
-		if (cloudDraft->topicRootId) {
-			flags |= MTPmessages_SaveDraft::Flag::f_top_msg_id;
+		if (cloudDraft->reply.messageId || cloudDraft->reply.topicRootId) {
+			flags |= MTPmessages_SaveDraft::Flag::f_reply_to;
 		}
 		if (!textWithTags.tags.isEmpty()) {
 			flags |= MTPmessages_SaveDraft::Flag::f_entities;
@@ -2156,11 +2156,13 @@ void ApiWrap::saveDraftsToCloud() {
 		history->startSavingCloudDraft(topicRootId);
 		cloudDraft->saveRequestId = request(MTPmessages_SaveDraft(
 			MTP_flags(flags),
-			MTP_int(cloudDraft->msgId),
-			MTP_int(cloudDraft->topicRootId),
+			ReplyToForMTP(history, cloudDraft->reply),
 			history->peer->input,
 			MTP_string(textWithTags.text),
-			entities
+			entities,
+			Data::WebPageForMTP(
+				cloudDraft->webpage,
+				textWithTags.text.isEmpty())
 		)).done([=](const MTPBool &result, const MTP::Response &response) {
 			const auto requestId = response.requestId;
 			history->finishSavingCloudDraft(
@@ -2247,7 +2249,7 @@ void ApiWrap::gotStickerSet(
 }
 
 void ApiWrap::requestWebPageDelayed(not_null<WebPageData*> page) {
-	if (page->pendingTill <= 0) {
+	if (page->failed || !page->pendingTill) {
 		return;
 	}
 	_webPagesPending.emplace(page, 0);
@@ -2436,7 +2438,13 @@ void ApiWrap::refreshFileReference(
 	};
 	v::match(origin.data, [&](Data::FileOriginMessage data) {
 		if (const auto item = _session->data().message(data)) {
-			if (item->isScheduled()) {
+			const auto media = item->media();
+			const auto storyId = media ? media->storyId() : FullStoryId();
+			if (storyId) {
+				request(MTPstories_GetStoriesByID(
+					_session->data().peer(storyId.peer)->input,
+					MTP_vector<MTPint>(1, MTP_int(storyId.story))));
+			} else if (item->isScheduled()) {
 				const auto &scheduled = _session->data().scheduledMessages();
 				const auto realId = scheduled.lookupId(item);
 				request(MTPmessages_GetScheduledMessages(
@@ -2546,7 +2554,8 @@ void ApiWrap::gotWebPages(ChannelData *channel, const MTPmessages_Messages &resu
 	for (auto i = _webPagesPending.begin(); i != _webPagesPending.cend();) {
 		if (i->second == req) {
 			if (i->first->pendingTill > 0) {
-				i->first->pendingTill = -1;
+				i->first->pendingTill = 0;
+				i->first->failed = 1;
 				_session->data().notifyWebPageUpdateDelayed(i->first);
 			}
 			i = _webPagesPending.erase(i);
@@ -3369,7 +3378,6 @@ void ApiWrap::sendSharedContact(
 	if (action.replyTo) {
 		flags |= MessageFlag::HasReplyInfo;
 	}
-	const auto replyHeader = NewMessageReplyHeader(action);
 	FillMessagePostFlags(action, peer, flags);
 	if (action.options.scheduled) {
 		flags |= MessageFlag::IsOrWasScheduled;
@@ -3573,14 +3581,15 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 	action.generateLocal = true;
 	sendAction(action);
 
-	const auto replyToId = action.replyTo.msgId;
-	const auto replyTo = replyToId
-		? peer->owner().message(peer, replyToId)
+	const auto clearCloudDraft = action.clearDraft;
+	const auto draftTopicRootId = action.replyTo.topicRootId;
+	const auto replyTo = action.replyTo.messageId
+		? peer->owner().message(action.replyTo.messageId)
 		: nullptr;
-	const auto topicRootId = replyTo
+	const auto topicRootId = draftTopicRootId
+		? draftTopicRootId
+		: replyTo
 		? replyTo->topicRootId()
-		: action.replyTo.topicRootId
-		? action.replyTo.topicRootId
 		: Data::ForumTopic::kGeneralId;
 	const auto topic = peer->forumTopicFor(topicRootId);
 	if (!(topic ? Data::CanSendTexts(topic) : Data::CanSendTexts(peer))
@@ -3603,7 +3612,13 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 
 	auto &histories = history->owner().histories();
 
-	while (TextUtilities::CutPart(sending, left, MaxMessageSize)) {
+	const auto exactWebPage = !message.webPage.url.isEmpty();
+	auto isFirst = true;
+	while (TextUtilities::CutPart(sending, left, MaxMessageSize)
+		|| (isFirst && exactWebPage)) {
+		TextUtilities::Trim(left);
+		const auto isLast = left.empty();
+
 		auto newId = FullMsgId(
 			peer->id,
 			_session->data().nextLocalMessageId());
@@ -3612,31 +3627,59 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 		TextUtilities::Trim(sending);
 
 		_session->data().registerMessageRandomId(randomId, newId);
-		_session->data().registerMessageSentData(randomId, peer->id, sending.text);
+		_session->data().registerMessageSentData(
+			randomId,
+			peer->id,
+			sending.text);
 
 		MTPstring msgText(MTP_string(sending.text));
 		auto flags = NewMessageFlags(peer);
 		auto sendFlags = MTPmessages_SendMessage::Flags(0);
+		auto mediaFlags = MTPmessages_SendMedia::Flags(0);
 		if (action.replyTo) {
 			flags |= MessageFlag::HasReplyInfo;
 			sendFlags |= MTPmessages_SendMessage::Flag::f_reply_to;
+			mediaFlags |= MTPmessages_SendMedia::Flag::f_reply_to;
 		}
-		const auto replyHeader = NewMessageReplyHeader(action);
+		const auto ignoreWebPage = message.webPage.removed
+			|| (exactWebPage && !isLast);
+		const auto manualWebPage = exactWebPage
+			&& !ignoreWebPage
+			&& (message.webPage.manual || (isLast && !isFirst));
 		MTPMessageMedia media = MTP_messageMediaEmpty();
-		if (message.webPageId == CancelledWebPageId) {
+		if (ignoreWebPage) {
 			sendFlags |= MTPmessages_SendMessage::Flag::f_no_webpage;
-		} else if (message.webPageId) {
-			auto page = _session->data().webpage(message.webPageId);
+		} else if (exactWebPage) {
+			using PageFlag = MTPDmessageMediaWebPage::Flag;
+			using PendingFlag = MTPDwebPagePending::Flag;
+			const auto &fields = message.webPage;
+			const auto page = _session->data().webpage(fields.id);
 			media = MTP_messageMediaWebPage(
+				MTP_flags(PageFlag()
+					| (manualWebPage ? PageFlag::f_manual : PageFlag())
+					| (fields.forceLargeMedia
+						? PageFlag::f_force_large_media
+						: PageFlag())
+					| (fields.forceSmallMedia
+						? PageFlag::f_force_small_media
+						: PageFlag())),
 				MTP_webPagePending(
-					MTP_long(page->id),
+					MTP_flags(PendingFlag::f_url),
+					MTP_long(fields.id),
+					MTP_string(fields.url),
 					MTP_int(page->pendingTill)));
 		}
 		const auto anonymousPost = peer->amAnonymous();
 		const auto silentPost = ShouldSendSilent(peer, action.options);
 		FillMessagePostFlags(action, peer, flags);
+		if (exactWebPage && !ignoreWebPage && message.webPage.invert) {
+			flags |= MessageFlag::InvertMedia;
+			sendFlags |= MTPmessages_SendMessage::Flag::f_invert_media;
+			mediaFlags |= MTPmessages_SendMedia::Flag::f_invert_media;
+		}
 		if (silentPost) {
 			sendFlags |= MTPmessages_SendMessage::Flag::f_silent;
+			mediaFlags |= MTPmessages_SendMedia::Flag::f_silent;
 		}
 		const auto sentEntities = Api::EntitiesToMTP(
 			_session,
@@ -3644,13 +3687,13 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 			Api::ConvertOption::SkipLocal);
 		if (!sentEntities.v.isEmpty()) {
 			sendFlags |= MTPmessages_SendMessage::Flag::f_entities;
+			mediaFlags |= MTPmessages_SendMedia::Flag::f_entities;
 		}
-		const auto clearCloudDraft = action.clearDraft;
-		const auto topicRootId = action.replyTo.topicRootId;
 		if (clearCloudDraft) {
 			sendFlags |= MTPmessages_SendMessage::Flag::f_clear_draft;
-			history->clearCloudDraft(topicRootId);
-			history->startSavingCloudDraft(topicRootId);
+			mediaFlags |= MTPmessages_SendMedia::Flag::f_clear_draft;
+			history->clearCloudDraft(draftTopicRootId);
+			history->startSavingCloudDraft(draftTopicRootId);
 		}
 		const auto sendAs = action.options.sendAs;
 		const auto messageFromId = sendAs
@@ -3660,6 +3703,7 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 			: _session->userPeerId();
 		if (sendAs) {
 			sendFlags |= MTPmessages_SendMessage::Flag::f_send_as;
+			mediaFlags |= MTPmessages_SendMedia::Flag::f_send_as;
 		}
 		const auto messagePostAuthor = peer->isBroadcast()
 			? _session->user()->name()
@@ -3667,6 +3711,7 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 		if (action.options.scheduled) {
 			flags |= MessageFlag::IsOrWasScheduled;
 			sendFlags |= MTPmessages_SendMessage::Flag::f_schedule_date;
+			mediaFlags |= MTPmessages_SendMedia::Flag::f_schedule_date;
 		}
 		const auto viaBotId = UserId();
 		lastMessage = history->addNewLocalMessage(
@@ -3680,27 +3725,18 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 			sending,
 			media,
 			HistoryMessageMarkupData());
-		histories.sendPreparedMessage(
-			history,
-			action.replyTo,
-			randomId,
-			Data::Histories::PrepareMessage<MTPmessages_SendMessage>(
-				MTP_flags(sendFlags),
-				peer->input,
-				Data::Histories::ReplyToPlaceholder(),
-				msgText,
-				MTP_long(randomId),
-				MTPReplyMarkup(),
-				sentEntities,
-				MTP_int(action.options.scheduled),
-				(sendAs ? sendAs->input : MTP_inputPeerEmpty())
-			), [=](const MTPUpdates &result, const MTP::Response &response) {
+		const auto done = [=](
+				const MTPUpdates &result,
+				const MTP::Response &response) {
 			if (clearCloudDraft) {
 				history->finishSavingCloudDraft(
-					topicRootId,
+					draftTopicRootId,
 					UnixtimeFromMsgId(response.outerMsgId));
 			}
-		}, [=](const MTP::Error &error, const MTP::Response &response) {
+		};
+		const auto fail = [=](
+				const MTP::Error &error,
+				const MTP::Response &response) {
 			if (error.type() == u"MESSAGE_EMPTY"_q) {
 				lastMessage->destroy();
 			} else {
@@ -3708,10 +3744,47 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 			}
 			if (clearCloudDraft) {
 				history->finishSavingCloudDraft(
-					topicRootId,
+					draftTopicRootId,
 					UnixtimeFromMsgId(response.outerMsgId));
 			}
-		});
+		};
+		if (exactWebPage
+			&& !ignoreWebPage
+			&& (manualWebPage || sending.empty())) {
+			histories.sendPreparedMessage(
+				history,
+				action.replyTo,
+				randomId,
+				Data::Histories::PrepareMessage<MTPmessages_SendMedia>(
+					MTP_flags(mediaFlags),
+					peer->input,
+					Data::Histories::ReplyToPlaceholder(),
+					Data::WebPageForMTP(message.webPage, true),
+					msgText,
+					MTP_long(randomId),
+					MTPReplyMarkup(),
+					sentEntities,
+					MTP_int(message.action.options.scheduled),
+					(sendAs ? sendAs->input : MTP_inputPeerEmpty())
+				), done, fail);
+		} else {
+			histories.sendPreparedMessage(
+				history,
+				action.replyTo,
+				randomId,
+				Data::Histories::PrepareMessage<MTPmessages_SendMessage>(
+					MTP_flags(sendFlags),
+					peer->input,
+					Data::Histories::ReplyToPlaceholder(),
+					msgText,
+					MTP_long(randomId),
+					MTPReplyMarkup(),
+					sentEntities,
+					MTP_int(action.options.scheduled),
+					(sendAs ? sendAs->input : MTP_inputPeerEmpty())
+				), done, fail);
+		}
+		isFirst = false;
 	}
 
 	finishForwarding(action);
@@ -3776,7 +3849,7 @@ void ApiWrap::sendInlineResult(
 			? (*localMessageId)
 			: _session->data().nextLocalMessageId());
 	const auto randomId = base::RandomValue<uint64>();
-	const auto topicRootId = action.replyTo.msgId
+	const auto topicRootId = action.replyTo.messageId
 		? action.replyTo.topicRootId
 		: 0;
 
@@ -4218,6 +4291,32 @@ void ApiWrap::saveSelfBio(const QString &text) {
 	}).fail([=] {
 		_bio.requestId = 0;
 	}).send();
+}
+
+void ApiWrap::registerStatsRequest(MTP::DcId dcId, mtpRequestId id) {
+	_statsRequests[dcId].emplace(id);
+}
+
+void ApiWrap::unregisterStatsRequest(MTP::DcId dcId, mtpRequestId id) {
+	const auto i = _statsRequests.find(dcId);
+	Assert(i != end(_statsRequests));
+	const auto removed = i->second.remove(id);
+	Assert(removed);
+	if (i->second.empty()) {
+		_statsSessionKillTimer.callOnce(kStatsSessionKillTimeout);
+	}
+}
+
+void ApiWrap::checkStatsSessions() {
+	for (auto i = begin(_statsRequests); i != end(_statsRequests);) {
+		if (i->second.empty()) {
+			instance().killSession(
+				MTP::ShiftDcId(i->first, MTP::kStatsDcShift));
+			i = _statsRequests.erase(i);
+		} else {
+			++i;
+		}
+	}
 }
 
 Api::Authorizations &ApiWrap::authorizations() {
