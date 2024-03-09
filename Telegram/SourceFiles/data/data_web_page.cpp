@@ -141,7 +141,7 @@ WebPageType ParseWebPageType(
 		const QString &type,
 		const QString &embedUrl,
 		bool hasIV) {
-	if (type == u"video"_q || !embedUrl.isEmpty()) {
+	if (type == u"video"_q || type == u"gif"_q || !embedUrl.isEmpty()) {
 		return WebPageType::Video;
 	} else if (type == u"photo"_q) {
 		return WebPageType::Photo;
@@ -179,6 +179,8 @@ WebPageType ParseWebPageType(
 		return WebPageType::BotApp;
 	} else if (type == u"telegram_channel_boost"_q) {
 		return WebPageType::ChannelBoost;
+	} else if (type == u"telegram_giftcode"_q) {
+		return WebPageType::Giftcode;
 	} else if (hasIV) {
 		return WebPageType::ArticleWithIV;
 	} else {

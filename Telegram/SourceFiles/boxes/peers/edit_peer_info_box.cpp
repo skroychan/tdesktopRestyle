@@ -22,6 +22,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_linked_chat_box.h"
 #include "boxes/peers/edit_peer_requests_box.h"
 #include "boxes/peers/edit_peer_reactions.h"
+#include "boxes/peers/replace_boost_box.h"
+#include "boxes/peer_list_controllers.h"
 #include "boxes/stickers_box.h"
 #include "boxes/username_box.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
@@ -34,14 +36,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_changes.h"
 #include "data/data_message_reactions.h"
 #include "data/data_peer_values.h"
+#include "data/data_premium_limits.h"
 #include "data/data_user.h"
 #include "history/admin_log/history_admin_log_section.h"
+#include "info/boosts/info_boosts_widget.h"
 #include "info/profile/info_profile_values.h"
+#include "info/info_memento.h"
 #include "lang/lang_keys.h"
 #include "mtproto/sender.h"
 #include "main/main_account.h"
 #include "main/main_app_config.h"
-#include "settings/settings_common.h" // IconDescriptor.
+#include "settings/settings_common.h"
+#include "ui/boxes/boost_box.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/rp_widget.h"
 #include "ui/vertical_list.h"
@@ -192,6 +198,37 @@ void SaveSlowmodeSeconds(
 	api->registerModifyRequest(key, requestId);
 }
 
+void SaveBoostsUnrestrict(
+		not_null<ChannelData*> channel,
+		int boostsUnrestrict,
+		Fn<void()> done) {
+	const auto api = &channel->session().api();
+	const auto key = Api::RequestKey("boosts_unrestrict", channel->id);
+	const auto requestId = api->request(
+		MTPchannels_SetBoostsToUnblockRestrictions(
+			channel->inputChannel,
+			MTP_int(boostsUnrestrict))
+	).done([=](const MTPUpdates &result) {
+		api->clearModifyRequest(key);
+		api->applyUpdates(result);
+		channel->setBoostsUnrestrict(
+			channel->boostsApplied(),
+			boostsUnrestrict);
+		done();
+	}).fail([=](const MTP::Error &error) {
+		api->clearModifyRequest(key);
+		if (error.type() != u"CHAT_NOT_MODIFIED"_q) {
+			return;
+		}
+		channel->setBoostsUnrestrict(
+			channel->boostsApplied(),
+			boostsUnrestrict);
+		done();
+	}).send();
+
+	api->registerModifyRequest(key, requestId);
+}
+
 void ShowEditPermissions(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<PeerData*> peer) {
@@ -209,6 +246,10 @@ void ShowEditPermissions(
 				close);
 			if (const auto channel = peer->asChannel()) {
 				SaveSlowmodeSeconds(channel, result.slowmodeSeconds, close);
+				SaveBoostsUnrestrict(
+					channel,
+					result.boostsUnrestrict,
+					close);
 			}
 		};
 		auto done = [=](EditPeerPermissionsBoxResult result) {
@@ -219,7 +260,8 @@ void ShowEditPermissions(
 
 			const auto saveFor = peer->migrateToOrMe();
 			const auto chat = saveFor->asChat();
-			if (!result.slowmodeSeconds || !chat) {
+			if (!chat
+				|| (!result.slowmodeSeconds && !result.boostsUnrestrict)) {
 				save(saveFor, result);
 				return;
 			}
@@ -255,6 +297,7 @@ private:
 		Ui::VerticalLayout *buttonsLayout = nullptr;
 		Ui::SettingsButton *forumToggle = nullptr;
 		bool forumToggleLocked = false;
+		bool levelRequested = false;
 		Ui::SlideWrap<> *historyVisibilityWrap = nullptr;
 	};
 	struct Saving {
@@ -304,6 +347,7 @@ private:
 	void submitDescription();
 	void deleteWithConfirmation();
 	void deleteChannel();
+	void editReactions();
 
 	[[nodiscard]] std::optional<Saving> validate() const;
 	[[nodiscard]] bool validateUsernamesOrder(Saving &to) const;
@@ -587,8 +631,9 @@ object_ptr<Ui::RpWidget> Controller::createStickersEdit() {
 		tr::lng_group_stickers_add(),
 		rpl::single(QString()), //Empty count.
 		[=, controller = _navigation->parentController()] {
+			const auto isEmoji = false;
 			controller->show(
-				Box<StickersBox>(controller->uiShow(), channel));
+				Box<StickersBox>(controller->uiShow(), channel, isEmoji));
 		},
 		{ &st::menuIconStickers });
 
@@ -1049,9 +1094,7 @@ void Controller::fillManageSection() {
 		&& (channel->hasAdminRights() || channel->amCreator());
 	const auto canEditStickers = isChannel && channel->canEditStickers();
 	const auto canDeleteChannel = isChannel && channel->canDelete();
-	const auto canEditColorIndex = isChannel
-		&& !channel->isMegagroup()
-		&& channel->canEditInformation();
+	const auto canEditColorIndex = isChannel && channel->canEditEmoji();
 	const auto canViewOrEditLinkedChat = isChannel
 		&& (channel->linkedChat()
 			|| (channel->isBroadcast() && channel->canEditInformation()));
@@ -1089,7 +1132,6 @@ void Controller::fillManageSection() {
 	}
 
 	if (canEditReactions()) {
-		const auto session = &_peer->session();
 		auto allowedReactions = Info::Profile::MigratedOrMeValue(
 			_peer
 		) | rpl::map([=](not_null<PeerData*> peer) {
@@ -1100,36 +1142,21 @@ void Controller::fillManageSection() {
 				return Data::PeerAllowedReactions(peer);
 			});
 		}) | rpl::flatten_latest();
-		auto label = rpl::combine(
-			std::move(allowedReactions),
-			Info::Profile::FullReactionsCountValue(session)
-		) | rpl::map([=](const Data::AllowedReactions &allowed, int total) {
+		auto label = std::move(
+			allowedReactions
+		) | rpl::map([=](const Data::AllowedReactions &allowed) {
 			const auto some = int(allowed.some.size());
 			return (allowed.type != Data::AllowedReactionsType::Some)
 				? tr::lng_manage_peer_reactions_on(tr::now)
 				: some
-				? (QString::number(some)
-					+ " / "
-					+ QString::number(std::max(some, total)))
+				? QString::number(some)
 				: tr::lng_manage_peer_reactions_off(tr::now);
 		});
-		const auto done = [=](const Data::AllowedReactions &chosen) {
-			SaveAllowedReactions(_peer, chosen);
-		};
 		AddButtonWithCount(
 			_controls.buttonsLayout,
 			tr::lng_manage_peer_reactions(),
 			std::move(label),
-			[=] {
-				_navigation->parentController()->show(Box(
-					EditAllowedReactionsBox,
-					_navigation,
-					!_peer->isBroadcast(),
-					session->data().reactions().list(
-						Data::Reactions::Type::Active),
-					Data::PeerAllowedReactions(_peer),
-					done));
-			},
+			[=] { editReactions(); },
 			{ &st::menuIconGroupReactions });
 	}
 	if (canEditPermissions) {
@@ -1275,6 +1302,66 @@ void Controller::fillManageSection() {
 	if (canEditStickers || canDeleteChannel) {
 		::AddSkip(_controls.buttonsLayout);
 	}
+}
+
+void Controller::editReactions() {
+	const auto done = [=](const Data::AllowedReactions &chosen) {
+		SaveAllowedReactions(_peer, chosen);
+	};
+	if (!_peer->isBroadcast()) {
+		_navigation->uiShow()->show(Box(
+			EditAllowedReactionsBox,
+			EditAllowedReactionsArgs{
+				.navigation = _navigation,
+				.isGroup = true,
+				.list = _navigation->session().data().reactions().list(
+					Data::Reactions::Type::Active),
+				.allowed = Data::PeerAllowedReactions(_peer),
+				.save = done,
+			}));
+		return;
+	}
+	if (_controls.levelRequested) {
+		return;
+	}
+	_controls.levelRequested = true;
+	_api.request(MTPpremium_GetBoostsStatus(
+		_peer->input
+	)).done([=](const MTPpremium_BoostsStatus &result) {
+		_controls.levelRequested = false;
+		if (const auto channel = _peer->asChannel()) {
+			channel->updateLevelHint(result.data().vlevel().v);
+		}
+		const auto link = qs(result.data().vboost_url());
+		const auto weak = base::make_weak(_navigation->parentController());
+		auto counters = ParseBoostCounters(result);
+		counters.mine = 0; // Don't show current level as just-reached.
+		const auto askForBoosts = [=](int required) {
+			if (const auto strong = weak.get()) {
+				const auto openStatistics = [=, peer = _peer] {
+					strong->showSection(Info::Boosts::Make(peer));
+				};
+				strong->show(Box(Ui::AskBoostBox, Ui::AskBoostBoxData{
+					.link = link,
+					.boost = counters,
+					.reason = { Ui::AskBoostCustomReactions{ required } },
+				}, openStatistics, nullptr));
+			}
+		};
+		_navigation->uiShow()->show(Box(
+			EditAllowedReactionsBox,
+			EditAllowedReactionsArgs{
+				.navigation = _navigation,
+				.allowedCustomReactions = counters.level,
+				.customReactionsHardLimit = Data::PremiumLimits(
+					&_peer->session()).maxBoostLevel(),
+				.list = _navigation->session().data().reactions().list(
+					Data::Reactions::Type::Active),
+				.allowed = Data::PeerAllowedReactions(_peer),
+				.askForBoosts = askForBoosts,
+				.save = done,
+			}));
+	}).send();
 }
 
 void Controller::fillPendingRequestsButton() {

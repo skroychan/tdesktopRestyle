@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QSessionManager>
 #include <QtGui/QScreen>
 #include <QtGui/qpa/qplatformscreen.h>
+#include <ksandbox.h>
 
 namespace Core {
 namespace {
@@ -159,16 +160,9 @@ int Sandbox::start() {
 
 	// https://github.com/telegramdesktop/tdesktop/issues/948
 	// and https://github.com/telegramdesktop/tdesktop/issues/5022
-	const auto restartHint = [](QSessionManager &manager) {
+	connect(this, &QGuiApplication::saveStateRequest, [](auto &manager) {
 		manager.setRestartHint(QSessionManager::RestartNever);
-	};
-
-	connect(
-		this,
-		&QGuiApplication::saveStateRequest,
-		this,
-		restartHint,
-		Qt::DirectConnection);
+	});
 
 	LOG(("Connecting local socket to %1...").arg(_localServerName));
 	_localSocket.connectToServer(_localServerName);
@@ -223,7 +217,7 @@ void Sandbox::setupScreenScale() {
 	const auto logEnv = [](const char *name) {
 		const auto value = qEnvironmentVariable(name);
 		if (!value.isEmpty()) {
-			LOG(("%1: %2").arg(name).arg(value));
+			LOG(("%1: %2").arg(name, value));
 		}
 	};
 	logEnv("QT_DEVICE_PIXEL_RATIO");
@@ -236,12 +230,7 @@ void Sandbox::setupScreenScale() {
 	logEnv("QT_USE_PHYSICAL_DPI");
 	logEnv("QT_FONT_DPI");
 
-	// Like Qt::HighDpiScaleFactorRoundingPolicy::RoundPreferFloor.
-	// Round up for .75 and higher. This favors "small UI" over "large UI".
-	const auto roundedRatio = ((ratio - qFloor(ratio)) < 0.75)
-		? qFloor(ratio)
-		: qCeil(ratio);
-	const auto useRatio = std::clamp(roundedRatio, 1, 3);
+	const auto useRatio = std::clamp(qCeil(ratio), 1, 3);
 	style::SetDevicePixelRatio(useRatio);
 
 	const auto screen = Sandbox::primaryScreen();
@@ -529,8 +518,10 @@ void Sandbox::refreshGlobalProxy() {
 		|| proxy.type == MTP::ProxyData::Type::Http) {
 		QNetworkProxy::setApplicationProxy(
 			MTP::ToNetworkProxy(MTP::ToDirectIpProxy(proxy)));
-	} else if (!Core::IsAppLaunched()
-		|| Core::App().settings().proxy().isSystem()) {
+	} else if ((!Core::IsAppLaunched()
+		|| Core::App().settings().proxy().isSystem())
+		// this works stable only in sandboxed environment where it works through portal
+		&& (!Platform::IsLinux() || KSandbox::isInside() || cDebugMode())) {
 		QNetworkProxyFactory::setUseSystemConfiguration(true);
 	} else {
 		QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);

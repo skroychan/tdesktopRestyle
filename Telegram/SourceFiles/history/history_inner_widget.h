@@ -36,6 +36,7 @@ class Element;
 class TranslateTracker;
 struct PinnedId;
 struct SelectedQuote;
+class AboutView;
 } // namespace HistoryView
 
 namespace HistoryView::Reactions {
@@ -157,6 +158,9 @@ public:
 	void elementSendBotCommand(
 		const QString &command,
 		const FullMsgId &context);
+	void elementSearchInList(
+		const QString &query,
+		const FullMsgId &context);
 	void elementHandleViaClick(not_null<UserData*> bot);
 	bool elementIsChatWide();
 	not_null<Ui::PathShiftGradient*> elementPathShiftGradient();
@@ -183,8 +187,6 @@ public:
 	void setChooseReportReason(Ui::ReportReason reason);
 	void clearChooseReportReason();
 
-	void setCanHaveFromUserpicsSponsored(bool value);
-
 	// -1 if should not be visible, -2 if bad history()
 	[[nodiscard]] int itemTop(const HistoryItem *item) const;
 	[[nodiscard]] int itemTop(const Element *view) const;
@@ -194,7 +196,7 @@ public:
 	[[nodiscard]] std::pair<Element*, int> findViewForPinnedTracking(
 		int top) const;
 
-	void notifyIsBotChanged();
+	void refreshAboutView();
 	void notifyMigrateUpdated();
 
 	// Ui::AbstractTooltipShower interface.
@@ -203,6 +205,7 @@ public:
 	bool tooltipWindowActive() const override;
 
 	void onParentGeometryChanged();
+	bool consumeScrollAction(QPoint delta);
 
 	[[nodiscard]] Fn<HistoryView::ElementDelegate*()> elementDelegateFactory(
 		FullMsgId itemId) const;
@@ -235,7 +238,6 @@ private:
 	void onTouchSelect();
 	void onTouchScrollTimer();
 
-	class BotAbout;
 	using ChosenReaction = HistoryView::Reactions::ChosenReaction;
 	using VideoUserpic = Dialogs::Ui::VideoUserpic;
 	using SelectedItems = std::map<HistoryItem*, TextSelection, std::less<>>;
@@ -450,7 +452,7 @@ private:
 	// the first _history message date (just skip it by height).
 	int _historySkipHeight = 0;
 
-	std::unique_ptr<BotAbout> _botAbout;
+	std::unique_ptr<HistoryView::AboutView> _aboutView;
 	std::unique_ptr<HistoryView::EmptyPainter> _emptyPainter;
 	std::unique_ptr<HistoryView::TranslateTracker> _translateTracker;
 
@@ -489,7 +491,8 @@ private:
 	bool _pressWasInactive = false;
 	bool _recountedAfterPendingResizedItems = false;
 	bool _useCornerReaction = false;
-	bool _canHaveFromUserpicsSponsored = false;
+	bool _acceptsHorizontalScroll = false;
+	bool _horizontalScrollLocked = false;
 
 	QPoint _trippleClickPoint;
 	base::Timer _trippleClickTimer;

@@ -39,6 +39,7 @@ class Entry;
 enum class SortMode;
 
 [[nodiscard]] QRect CornerBadgeTTLRect(int photoSize);
+[[nodiscard]] QImage BlurredDarkenedPart(QImage image, QRect part);
 
 class BasicRow {
 public:
@@ -129,6 +130,9 @@ public:
 	}
 	[[nodiscard]] Data::Thread *thread() const {
 		return _id.thread();
+	}
+	[[nodiscard]] Data::SavedSublist *sublist() const {
+		return _id.sublist();
 	}
 	[[nodiscard]] not_null<Entry*> entry() const {
 		return _id.entry();

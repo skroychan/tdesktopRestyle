@@ -610,13 +610,9 @@ NotificationsCount::SampleWidget::SampleWidget(
 	const QPixmap &cache)
 : _owner(owner)
 , _cache(cache) {
-	const QSize size(
+	setFixedSize(
 		cache.width() / cache.devicePixelRatio(),
 		cache.height() / cache.devicePixelRatio());
-
-	resize(size);
-	setMinimumSize(size);
-	setMaximumSize(size);
 
 	setWindowFlags(Qt::WindowFlags(Qt::FramelessWindowHint)
 		| Qt::WindowStaysOnTopHint
@@ -1285,17 +1281,11 @@ rpl::producer<QString> Notifications::title() {
 	return tr::lng_settings_section_notify();
 }
 
-rpl::producer<Type> Notifications::sectionShowOther() {
-	return _showOther.events();
-}
-
 void Notifications::setupContent(
 		not_null<Window::SessionController*> controller) {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 
-	SetupNotifications(controller, content, [=](Type type) {
-		_showOther.fire_copy(type);
-	});
+	SetupNotifications(controller, content, showOtherMethod());
 
 	Ui::ResizeFitChild(this, content);
 }
