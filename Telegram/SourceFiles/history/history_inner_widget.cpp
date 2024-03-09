@@ -699,9 +699,7 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 }
 
 bool HistoryInner::canHaveFromUserpics() const {
-	if (_canHaveFromUserpicsSponsored) {
-		return true;
-	} else if (_peer->isChannel() && !_peer->isMegagroup()) {
+	if (_peer->isChannel() && !_peer->isMegagroup()) {
 		return false;
 	}
 	return true;

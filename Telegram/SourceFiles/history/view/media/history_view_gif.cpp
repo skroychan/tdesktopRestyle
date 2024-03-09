@@ -873,9 +873,6 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 				paintTranscribe(p, fastShareLeft, fastShareTop, true, context);
 			}
 		}
-		if (rightAligned && _transcribe) {
-			paintTranscribe(p, usex, fullBottom, false, context);
-		}
 	}
 }
 

@@ -324,7 +324,7 @@ void UnwrappedMedia::drawSurrounding(
 	if (rightActionSize) {
 		const auto position = calculateFastActionPosition(
 			inner,
-			rightAligned,
+			false,
 			replyLeft,
 			replyRight,
 			reply ? reply->height() : 0,
@@ -473,7 +473,7 @@ TextState UnwrappedMedia::textState(QPoint point, StateRequest request) const {
 		if (rightActionSize) {
 			const auto position = calculateFastActionPosition(
 				inner,
-				rightAligned,
+				false,
 				replyLeft,
 				replyRight,
 				reply ? reply->height() : 0,
