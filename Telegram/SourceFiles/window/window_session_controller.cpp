@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_info_box.h"
 #include "boxes/peers/replace_boost_box.h"
 #include "boxes/delete_messages_box.h"
+#include "window/window_chat_preview.h"
 #include "window/window_controller.h"
 #include "window/window_filters_menu.h"
 #include "info/channel_statistics/earn/info_earn_inner_widget.h"
@@ -22,7 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/view/reactions/history_view_reactions.h"
-#include "history/view/reactions/history_view_reactions_button.h"
+//#include "history/view/reactions/history_view_reactions_button.h"
 #include "history/view/history_view_replies_section.h"
 #include "history/view/history_view_scheduled_section.h"
 #include "media/player/media_player_instance.h"
@@ -58,6 +59,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/format_values.h" // Ui::FormatPhone.
 #include "ui/delayed_activation.h"
 #include "ui/boxes/boost_box.h"
+#include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/effects/message_sending_animation_controller.h"
 #include "ui/style/style_palette_colorizer.h"
@@ -121,7 +123,7 @@ public:
 	rpl::producer<> pauseChanged() const override;
 
 	rpl::producer<bool> adjustShadowLeft() const override;
-	SendMenu::Type sendMenuType() const override;
+	SendMenu::Details sendMenuDetails() const override;
 
 	bool showMediaPreview(
 		Data::FileOrigin origin,
@@ -271,12 +273,12 @@ rpl::producer<bool> MainWindowShow::adjustShadowLeft() const {
 	});
 }
 
-SendMenu::Type MainWindowShow::sendMenuType() const {
+SendMenu::Details MainWindowShow::sendMenuDetails() const {
 	const auto window = _window.get();
 	if (!window) {
-		return SendMenu::Type::Disabled;
+		return SendMenu::Details();
 	}
-	return window->content()->sendMenuType();
+	return window->content()->sendMenuDetails();
 }
 
 bool MainWindowShow::showMediaPreview(
@@ -572,7 +574,7 @@ void SessionNavigation::showPeerByLinkResolved(
 			info.messageId,
 			commentId->id,
 			params);
-	} else if (peer->isForum()) {
+	} else if (peer->isForum() && resolveType != ResolveType::Boost) {
 		const auto itemId = info.messageId;
 		if (!itemId) {
 			parentController()->showForum(peer->forum(), params);
@@ -702,7 +704,11 @@ void SessionNavigation::showPeerByLinkResolved(
 						contextUser->owner().history(contextUser))
 					: std::optional<Api::SendAction>()));
 		} else {
+			const auto draft = info.text;
 			crl::on_main(this, [=] {
+				if (peer->isUser() && !draft.isEmpty()) {
+					Data::SetChatLinkDraft(peer, { draft });
+				}
 				showPeerHistory(peer, params, msgId);
 			});
 		}
@@ -1174,6 +1180,7 @@ SessionController::SessionController(
 , _window(window)
 , _emojiInteractions(
 	std::make_unique<ChatHelpers::EmojiInteractions>(session))
+, _chatPreviewManager(std::make_unique<ChatPreviewManager>(this))
 , _isPrimary(window->isPrimary())
 , _sendingAnimation(
 	std::make_unique<Ui::MessageSendingAnimationController>(this))
@@ -1186,7 +1193,6 @@ SessionController::SessionController(
 , _activeChatsFilter(session->data().chatsFilters().defaultId())
 , _defaultChatTheme(std::make_shared<Ui::ChatTheme>())
 , _chatStyle(std::make_unique<Ui::ChatStyle>(session->colorIndicesValue()))
-, _cachedReactionIconFactory(std::make_unique<ReactionIconFactory>())
 , _giftPremiumValidator(this) {
 	init();
 
@@ -1888,15 +1894,6 @@ int SessionController::minimalThreeColumnWidth() const {
 		+ st::columnMinimalWidthThird;
 }
 
-bool SessionController::forceWideDialogs() const {
-	if (_dialogsListDisplayForced.current()) {
-		return true;
-	} else if (_dialogsListFocused.current()) {
-		return true;
-	}
-	return !content()->isMainSectionShown();
-}
-
 auto SessionController::computeColumnLayout() const -> ColumnLayout {
 	auto layout = Adaptive::WindowLayout::OneColumn;
 
@@ -1951,7 +1948,10 @@ int SessionController::countDialogsWidthFromRatio(int bodyWidth) const {
 	if (!_isPrimary) {
 		return 0;
 	}
-	auto result = qRound(bodyWidth * Core::App().settings().dialogsWidthRatio());
+	const auto nochat = !mainSectionShown();
+	const auto width = bodyWidth
+		* Core::App().settings().dialogsWidthRatio(nochat);
+	auto result = qRound(width);
 	accumulate_max(result, st::columnMinimalWidthLeft);
 //	accumulate_min(result, st::columnMaximalWidthLeft);
 	return result;
@@ -2011,10 +2011,10 @@ void SessionController::resizeForThirdSection() {
 
 	auto &settings = Core::App().settings();
 	auto layout = computeColumnLayout();
-	auto tabbedSelectorSectionEnabled =
-		settings.tabbedSelectorSectionEnabled();
-	auto thirdSectionInfoEnabled =
-		settings.thirdSectionInfoEnabled();
+	auto tabbedSelectorSectionEnabled
+		= settings.tabbedSelectorSectionEnabled();
+	auto thirdSectionInfoEnabled
+		= settings.thirdSectionInfoEnabled();
 	settings.setTabbedSelectorSectionEnabled(false);
 	settings.setThirdSectionInfoEnabled(false);
 
@@ -2040,10 +2040,12 @@ void SessionController::resizeForThirdSection() {
 		if (extendBy != settings.thirdColumnWidth()) {
 			settings.setThirdColumnWidth(extendBy);
 		}
+		const auto nochat = !mainSectionShown();
 		auto newBodyWidth = layout.bodyWidth + extendedBy;
-		auto currentRatio = settings.dialogsWidthRatio();
-		settings.setDialogsWidthRatio(
-			(currentRatio * layout.bodyWidth) / newBodyWidth);
+		auto currentRatio = settings.dialogsWidthRatio(nochat);
+		settings.updateDialogsWidthRatio(
+			(currentRatio * layout.bodyWidth) / newBodyWidth,
+			nochat);
 	}
 	auto savedValue = (extendedBy == extendBy) ? -1 : extendedBy;
 	settings.setThirdSectionExtendedBy(savedValue);
@@ -2059,6 +2061,7 @@ void SessionController::closeThirdSection() {
 	auto newWindowSize = widget()->size();
 	auto layout = computeColumnLayout();
 	if (layout.windowLayout == Adaptive::WindowLayout::ThreeColumn) {
+		const auto nochat = !mainSectionShown();
 		auto noResize = widget()->isFullScreen()
 			|| widget()->isMaximized();
 		auto savedValue = settings.thirdSectionExtendedBy();
@@ -2068,9 +2071,10 @@ void SessionController::closeThirdSection() {
 		auto newBodyWidth = noResize
 			? layout.bodyWidth
 			: (layout.bodyWidth - extendedBy);
-		auto currentRatio = settings.dialogsWidthRatio();
-		settings.setDialogsWidthRatio(
-			(currentRatio * layout.bodyWidth) / newBodyWidth);
+		auto currentRatio = settings.dialogsWidthRatio(nochat);
+		settings.updateDialogsWidthRatio(
+			(currentRatio * layout.bodyWidth) / newBodyWidth,
+			nochat);
 		newWindowSize = QSize(
 			widget()->width() + (newBodyWidth - layout.bodyWidth),
 			widget()->height());
@@ -2949,7 +2953,7 @@ void SessionController::openPeerStories(
 }
 
 HistoryView::PaintContext SessionController::preparePaintContext(
-		PaintContextArgs &&args) {
+		Ui::ChatPaintContextArgs &&args) {
 	const auto visibleAreaTopLocal = content()->mapFromGlobal(
 		args.visibleAreaPositionGlobal).y();
 	const auto viewport = QRect(
@@ -2970,6 +2974,34 @@ void SessionController::setPremiumRef(const QString &ref) {
 
 QString SessionController::premiumRef() const {
 	return _premiumRef;
+}
+
+bool SessionController::showChatPreview(
+		Dialogs::RowDescriptor row,
+		Fn<void(bool shown)> callback,
+		QPointer<QWidget> parentOverride,
+		std::optional<QPoint> positionOverride) {
+	return _chatPreviewManager->show(
+		std::move(row),
+		std::move(callback),
+		std::move(parentOverride),
+		positionOverride);
+}
+
+bool SessionController::scheduleChatPreview(
+		Dialogs::RowDescriptor row,
+		Fn<void(bool shown)> callback,
+	QPointer<QWidget> parentOverride,
+	std::optional<QPoint> positionOverride) {
+	return _chatPreviewManager->schedule(
+		std::move(row),
+		std::move(callback),
+		std::move(parentOverride),
+		positionOverride);
+}
+
+void SessionController::cancelScheduledPreview() {
+	_chatPreviewManager->cancelScheduled();
 }
 
 bool SessionController::contentOverlapped(QWidget *w, QPaintEvent *e) const {

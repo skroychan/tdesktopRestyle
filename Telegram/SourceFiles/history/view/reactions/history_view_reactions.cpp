@@ -182,7 +182,7 @@ InlineList::Button InlineList::prepareButtonWithId(const ReactionId &id) {
 			customId,
 			_customEmojiRepaint);
 	} else {
-		_owner->preloadImageFor(id);
+		_owner->preloadReactionImageFor(id);
 	}
 	return result;
 }
@@ -431,9 +431,7 @@ void InlineList::paint(
 			}
 		}
 		if (!button.custom && button.image.isNull()) {
-			button.image = _owner->resolveImageFor(
-				button.id,
-				::Data::Reactions::ImageSize::InlineList);
+			button.image = _owner->resolveReactionImageFor(button.id);
 		}
 
 		const auto textFg = !inbubble
