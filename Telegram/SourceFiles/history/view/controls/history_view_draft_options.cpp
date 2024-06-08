@@ -348,7 +348,6 @@ void PreviewWrap::paintEvent(QPaintEvent *e) {
 		rect(),
 		e->rect(),
 		!window()->isActiveWindow());
-	context.outbg = _element->hasOutLayout();
 	context.selection = _selecting
 		? resolveNewSelection()
 		: _selection.current();

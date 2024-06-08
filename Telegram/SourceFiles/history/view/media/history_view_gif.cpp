@@ -401,7 +401,6 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 
 	auto paintx = 0, painty = 0, paintw = width(), painth = height();
 	const bool bubble = _parent->hasBubble();
-	const auto rightLayout = _parent->hasRightLayout();
 	const auto inWebPage = (_parent->media() != this);
 	const auto isRound = _data->isVideoMessage();
 
@@ -778,9 +777,7 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 			const auto rightActionWidth = size
 				? size->width()
 				: _transcribe->size().width();
-			auto fastShareLeft = rightLayout
-				? (paintx + usex - size->width() - st::historyFastShareLeft)
-				: (fullRight + st::historyFastShareLeft);
+			auto fastShareLeft = fullRight + st::historyFastShareLeft;
 			auto fastShareTop = fullBottom
 				- st::historyFastShareBottom
 				- (size ? size->height() : 0);
@@ -1142,9 +1139,7 @@ TextState Gif::textState(QPoint point, StateRequest request) const {
 		}
 		if (const auto size = bubble ? std::nullopt : _parent->rightActionSize()) {
 			const auto rightActionWidth = size->width();
-			auto fastShareLeft = _parent->hasRightLayout()
-				? (paintx + usex - size->width() - st::historyFastShareLeft)
-				: (fullRight + st::historyFastShareLeft);
+			auto fastShareLeft = fullRight + st::historyFastShareLeft;
 			auto fastShareTop = fullBottom
 				- st::historyFastShareBottom
 				- size->height();
@@ -1504,9 +1499,6 @@ QRect Gif::contentRectForReactions() const {
 	}
 	auto paintx = 0, painty = 0, paintw = width(), painth = height();
 	auto usex = 0, usew = paintw;
-	const auto outbg = _parent->hasOutLayout();
-	const auto rightAligned = outbg
-		&& !_parent->delegate()->elementIsChatWide();
 	const auto item = _parent->data();
 	const auto via = item->Get<HistoryMessageVia>();
 	const auto reply = _parent->Get<Reply>();
@@ -1542,16 +1534,11 @@ QPoint Gif::resolveCustomInfoRightBottom() const {
 			maxRight -= st::msgMargin.left();
 		}
 		const auto infoWidth = _parent->infoWidth();
-		const auto outbg = _parent->hasOutLayout();
-		const auto rightAligned = outbg
-			&& !_parent->delegate()->elementIsChatWide();
-		if (!rightAligned) {
-			// This is just some arbitrary point,
-			// the main idea is to make info left aligned here.
-			fullRight += infoWidth - st::normalFont->height;
-			if (fullRight > maxRight) {
-				fullRight = maxRight;
-			}
+		// This is just some arbitrary point,
+		// the main idea is to make info left aligned here.
+		fullRight += infoWidth - st::normalFont->height;
+		if (fullRight > maxRight) {
+			fullRight = maxRight;
 		}
 	}
 	const auto skipx = unwrapped

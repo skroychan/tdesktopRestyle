@@ -1055,7 +1055,6 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 			const auto height = view->height();
 			context.reactionInfo
 				= _reactionsManager->currentReactionPaintInfo();
-			context.outbg = view->hasOutLayout();
 			context.selection = itemRenderSelection(
 				view,
 				selfromy - mtop,
@@ -1101,7 +1100,6 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 				&& !sendingAnimation.hasAnimatedMessage(item)) {
 				context.reactionInfo
 					= _reactionsManager->currentReactionPaintInfo();
-				context.outbg = view->hasOutLayout();
 				context.selection = itemRenderSelection(
 					view,
 					selfromy - htop,

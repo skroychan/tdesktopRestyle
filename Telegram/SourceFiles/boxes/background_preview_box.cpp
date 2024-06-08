@@ -967,11 +967,9 @@ void BackgroundPreviewBox::paintTexts(Painter &p, crl::time ms) {
 		p.translate(0, heights);
 	}
 
-	context.outbg = _text1->hasOutLayout();
 	_text1->draw(p, context);
 	p.translate(0, height1);
 	if (!forChannel()) {
-		context.outbg = _text2->hasOutLayout();
 		_text2->draw(p, context);
 		p.translate(0, height2);
 	}

@@ -379,9 +379,7 @@ QRect EmojiInteractions::computeRect(const Play &play) const {
 			return QRect();
 		}
 		const auto size = play.outer;
-		const auto shift = view->hasRightLayout()
-			? (-size.width() / 3)
-			: (size.width() / 3);
+		const auto shift = size.width() / 3;
 		return QRect(
 			shift + icon.x() + (icon.width() - size.width()) / 2,
 			viewTop + icon.y() + (icon.height() - size.height()) / 2,

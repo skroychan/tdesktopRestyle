@@ -981,7 +981,6 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 			p.translate(0, top);
 			for (auto i = from; i != to; ++i) {
 				const auto view = i->get();
-				context.outbg = view->hasOutLayout();
 				context.selection = (view == _selectedItem)
 					? _selectedText
 					: TextSelection();

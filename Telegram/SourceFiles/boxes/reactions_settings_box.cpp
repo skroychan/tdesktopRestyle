@@ -151,7 +151,6 @@ void AddMessage(
 			widget->rect(),
 			controller->isGifPausedAtLeastFor(
 				Window::GifPauseReason::Layer));
-		context.outbg = view->hasOutLayout();
 
 		{
 			const auto radius = rightSize.height() / 2;

@@ -1431,9 +1431,7 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 				(g.height() - size->height()) / 2,
 				0,
 				st::historyFastShareBottom);
-			const auto fastShareLeft = hasRightLayout()
-				? (g.left() - size->width() - st::historyFastShareLeft)
-				: (g.left() + g.width() + st::historyFastShareLeft);
+			const auto fastShareLeft = g.left() + g.width() + st::historyFastShareLeft;
 			const auto fastShareTop = data()->isSponsored()
 				? g.top() + fastShareSkip
 				: g.top() + g.height() - fastShareSkip - size->height();
@@ -2285,11 +2283,6 @@ bool Message::hasFromPhoto() const {
 			return false;
 		} else if (delegate()->elementIsChatWide()) {
 			return true;
-		} else if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
-			const auto peer = item->history()->peer;
-			if (peer->isSelf() || peer->isRepliesChat()) {
-				return !hasOutLayout();
-			}
 		}
 		return true;
 	} break;
@@ -2506,9 +2499,7 @@ TextState Message::textState(
 				(g.height() - size->height()) / 2,
 				0,
 				st::historyFastShareBottom);
-			const auto fastShareLeft = hasRightLayout()
-				? (g.left() - size->width() - st::historyFastShareLeft)
-				: (g.left() + g.width() + st::historyFastShareLeft);
+			const auto fastShareLeft = g.left() + g.width() + st::historyFastShareLeft;
 			const auto fastShareTop = data()->isSponsored()
 				? g.top() + fastShareSkip
 				: g.top() + g.height() - fastShareSkip - size->height();
@@ -4207,9 +4198,9 @@ Ui::BubbleRounding Message::countMessageRounding() const {
 		.topRight = Corner::Large,
 		.bottomLeft = smallBottom
 			? Corner::Small
-			: (!skipTail && true)
-			? Corner::Tail
-			: Corner::Large,
+			: skipTail
+			? Corner::Large
+			: Corner::Tail,
 		.bottomRight = Corner::Large,
 	};
 }

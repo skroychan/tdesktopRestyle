@@ -464,9 +464,7 @@ void Location::draw(Painter &p, const PaintContext &context) const {
 			paintx * 2 + paintw,
 			InfoDisplayType::Image);
 		if (const auto size = bubble ? std::nullopt : _parent->rightActionSize()) {
-			auto fastShareLeft = _parent->hasRightLayout()
-				? (paintx - size->width() - st::historyFastShareLeft)
-				: (fullRight + st::historyFastShareLeft);
+			auto fastShareLeft = fullRight + st::historyFastShareLeft;
 			auto fastShareTop = (fullBottom - st::historyFastShareBottom - size->height());
 			_parent->drawRightAction(p, context, fastShareLeft, fastShareTop, 2 * paintx + paintw);
 		}
@@ -669,9 +667,7 @@ TextState Location::textState(QPoint point, StateRequest request) const {
 			return bottomInfoResult;
 		}
 		if (const auto size = bubble ? std::nullopt : _parent->rightActionSize()) {
-			auto fastShareLeft = _parent->hasRightLayout()
-				? (paintx - size->width() - st::historyFastShareLeft)
-				: (fullRight + st::historyFastShareLeft);
+			auto fastShareLeft = fullRight + st::historyFastShareLeft;
 			auto fastShareTop = (fullBottom - st::historyFastShareBottom - size->height());
 			if (QRect(fastShareLeft, fastShareTop, size->width(), size->height()).contains(point)) {
 				result.link = _parent->rightActionLink(point

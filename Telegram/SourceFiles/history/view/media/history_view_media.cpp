@@ -341,7 +341,7 @@ auto Media::getBubbleSelectionIntervals(
 }
 
 bool Media::usesBubblePattern(const PaintContext &context) const {
-	return false;
+	return _parent->usesBubblePattern(context);
 }
 
 PointState Media::pointState(QPoint point) const {

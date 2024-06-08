@@ -323,7 +323,6 @@ void PreviewWrap::paintEvent(QPaintEvent *e) {
 			Rect(_element->currentSize()),
 			Rect(_element->currentSize()),
 			!window()->isActiveWindow());
-		context.outbg = _element->hasOutLayout();
 		_element->draw(p, context);
 	}
 }
